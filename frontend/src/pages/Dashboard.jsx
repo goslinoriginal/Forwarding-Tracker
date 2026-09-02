@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import { CARRIER_STYLES } from "@/lib/api";
-import { Ship, Users, AlertTriangle, PackageCheck, Clock, ArrowRight } from "lucide-react";
+import { Ship, Users, AlertTriangle, PackageCheck, Clock, ArrowRight, BellRing } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 function Stat({ label, value, icon: Icon, tone = "cyan", testid }) {
@@ -31,13 +31,19 @@ function Stat({ label, value, icon: Icon, tone = "cyan", testid }) {
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [clients, setClients] = useState([]);
+  const [reminders, setReminders] = useState([]);
 
   useEffect(() => {
     (async () => {
       try {
-        const [s, c] = await Promise.all([api.get("/dashboard/stats"), api.get("/clients")]);
+        const [s, c, r] = await Promise.all([
+          api.get("/dashboard/stats"),
+          api.get("/clients"),
+          api.get("/dashboard/reminders"),
+        ]);
         setStats(s.data);
         setClients(c.data);
+        setReminders(r.data?.reminders || []);
       } catch (e) {
         console.error(e);
       }
@@ -72,8 +78,62 @@ export default function Dashboard() {
         <Stat testid="stat-clients" label="Active clients" value={stats?.total_clients ?? "—"} icon={Users} tone="cyan" />
         <Stat testid="stat-active" label="Active shipments" value={stats?.active_shipments ?? "—"} icon={Ship} tone="emerald" />
         <Stat testid="stat-delayed" label="Delayed" value={stats?.delayed ?? "—"} icon={AlertTriangle} tone="rose" />
-        <Stat testid="stat-booked" label="Booked / Pending" value={stats?.booked ?? "—"} icon={Clock} tone="amber" />
+        <Stat testid="stat-reminders" label="Cargo reports due" value={reminders.length} icon={BellRing} tone="amber" />
       </div>
+
+      {reminders.length > 0 && (
+        <div className="mb-6 rounded-lg border border-amber-500/40 bg-amber-500/5 p-5" data-testid="reminders-panel">
+          <div className="flex items-center gap-2 mb-3">
+            <BellRing className="h-4 w-4 text-amber-400" />
+            <div className="font-mono text-[10px] tracking-widest uppercase text-amber-300">/cargo reporting due</div>
+          </div>
+          <p className="text-xs text-slate-400 mb-4">
+            FCL: 2 days before ETD (2nd vessel if transhipment). LCL: 10 days before ETA.
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-amber-500/20 text-[10px] font-mono uppercase tracking-widest text-amber-300/80">
+                  <th className="text-left px-3 py-2">Client</th>
+                  <th className="text-left px-3 py-2">Supplier</th>
+                  <th className="text-left px-3 py-2">Vessel</th>
+                  <th className="text-left px-3 py-2">Type</th>
+                  <th className="text-left px-3 py-2">Trigger</th>
+                  <th className="text-right px-3 py-2">Target</th>
+                  <th className="text-right px-3 py-2">Days left</th>
+                  <th className="px-2 py-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {reminders.map((r) => {
+                  const overdue = r.days_left < 0;
+                  const today = r.days_left === 0;
+                  return (
+                    <tr key={r.shipment_id} className="border-b border-amber-500/10 hover:bg-amber-500/5" data-testid={`reminder-${r.shipment_id}`}>
+                      <td className="px-3 py-2 text-slate-200">{r.client_name}</td>
+                      <td className="px-3 py-2 text-slate-300">{r.supplier || "—"}</td>
+                      <td className="px-3 py-2 text-slate-200">{r.vessel_name || "—"}</td>
+                      <td className="px-3 py-2">
+                        <span className={`text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border ${r.cargo_type === "LCL" ? "bg-sky-500/10 text-sky-300 border-sky-500/30" : "bg-emerald-500/10 text-emerald-300 border-emerald-500/30"}`}>
+                          {r.cargo_type}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-slate-400 text-xs">{r.kind}</td>
+                      <td className="px-3 py-2 text-right font-mono text-xs text-slate-300">{r.target_date}</td>
+                      <td className={`px-3 py-2 text-right font-mono text-sm tabular-nums ${overdue ? "text-rose-300" : today ? "text-amber-300" : "text-amber-200"}`}>
+                        {overdue ? `${Math.abs(r.days_left)}d overdue` : today ? "today" : `${r.days_left}d`}
+                      </td>
+                      <td className="px-2 py-2 text-right">
+                        <Link to={`/clients/${r.client_id}`} className="text-xs text-cyan-400 hover:text-cyan-300" data-testid={`reminder-open-${r.shipment_id}`}>Open →</Link>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
         {/* Carrier distribution */}

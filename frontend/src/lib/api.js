@@ -44,7 +44,24 @@ export const QUICK_COMMENTS = [
   "ANF received. Docs to Ops.",
 ];
 
+export const CARRIER_TRACK_URL = {
+  MSC: (n) => `https://www.msc.com/en/track-a-shipment?agencyPath=mscu&searchNumber=${encodeURIComponent(n)}`,
+  Maersk: (n) => `https://www.maersk.com/tracking/${encodeURIComponent(n)}`,
+  ONE: (n) => `https://ecomm.one-line.com/one-ecom/manage-shipment/cargo-tracking?trakNoParam=${encodeURIComponent(n)}`,
+  COSCO: (n) => `https://elines.coscoshipping.com/ebusiness/cargoTracking?trackingType=BILLOFLADING&number=${encodeURIComponent(n)}`,
+  "Hapag Lloyd": (n) => `https://www.hapag-lloyd.com/en/online-business/track/track-by-container-solution.html?container=${encodeURIComponent(n)}`,
+  PIL: () => "https://www.pilship.com/en/tracking",
+  "CMA CGM": (n) => `https://www.cma-cgm.com/ebusiness/tracking/search?SearchBy=Container&Reference=${encodeURIComponent(n)}`,
+  Vanguard: (n) => `https://www.track-trace.com/container?number=${encodeURIComponent(n)}`,
+  Other: (n) => `https://www.track-trace.com/container?number=${encodeURIComponent(n)}`,
+};
+
 export function trackTraceUrl(docNumber) {
   if (!docNumber) return "https://www.track-trace.com/container";
   return `https://www.track-trace.com/container?number=${encodeURIComponent(docNumber.trim())}`;
+}
+
+export function carrierTrackUrl(carrier, docNumber) {
+  const fn = CARRIER_TRACK_URL[carrier] || CARRIER_TRACK_URL.Other;
+  return fn(docNumber ? docNumber.trim() : "");
 }

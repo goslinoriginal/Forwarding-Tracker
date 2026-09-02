@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, API, CARRIERS, CARRIER_STYLES, OPTIONAL_COLUMNS, QUICK_COMMENTS, STATUS_STYLES, trackTraceUrl } from "@/lib/api";
+import { api, API, CARRIERS, CARRIER_STYLES, OPTIONAL_COLUMNS, QUICK_COMMENTS, STATUS_STYLES, carrierTrackUrl } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,9 +26,11 @@ import {
 } from "lucide-react";
 
 const emptyShipment = {
-  supplier: "", order_booking_file: "", file_number: "", status: "Booked",
+  supplier: "", order_booking_file: "", file_number: "", cargo_type: "FCL", status: "Booked",
   sob_date: "", vessel_name: "", tracking_doc_number: "", carrier: "MSC",
-  pol: "", pod: "", eta: "", final_destination: "", comments: "",
+  pol: "", pod: "", eta: "", planned_etd: "", planned_eta: "",
+  second_vessel_name: "", second_vessel_etd: "",
+  final_destination: "", comments: "",
   hbill_released: null, expected_freight_rate: "",
 };
 
@@ -49,22 +51,35 @@ function CarrierBadge({ carrier }) {
 }
 
 function VesselCell({ ship }) {
+  const openCarrier = async () => {
+    const num = (ship.tracking_doc_number || "").trim();
+    if (!num) { toast.info("No tracking number"); return; }
+    try { await navigator.clipboard.writeText(num); } catch {}
+    toast.success(`${num} copied — paste in ${ship.carrier}'s tracking field`);
+    window.open(carrierTrackUrl(ship.carrier, num), "_blank", "noopener,noreferrer");
+  };
   return (
     <div className="min-w-[180px] leading-tight">
-      <div className="font-semibold text-slate-100 text-sm truncate">{ship.vessel_name || <span className="text-slate-600 italic font-normal">no vessel</span>}</div>
+      <div className="font-semibold text-slate-100 text-sm truncate">
+        {ship.vessel_name || <span className="text-slate-600 italic font-normal">no vessel</span>}
+        {ship.second_vessel_name && <span className="text-[10px] text-slate-500 font-normal ml-1">(1st)</span>}
+      </div>
+      {ship.second_vessel_name && (
+        <div className="text-xs text-slate-300 mt-0.5">
+          {ship.second_vessel_name} <span className="text-[10px] text-slate-500">(2nd)</span>
+        </div>
+      )}
       {ship.tracking_doc_number && (
         <div className="mt-1 flex items-center gap-1.5">
-          <a
-            href={trackTraceUrl(ship.tracking_doc_number)}
-            target="_blank"
-            rel="noreferrer"
+          <button
+            onClick={openCarrier}
             data-testid={`track-trace-link-${ship.id}`}
-            title="Track on track-trace.com"
+            title={`Open ${ship.carrier} tracking & copy number`}
             className="font-mono text-[11px] font-semibold px-1.5 py-0.5 rounded bg-slate-800 text-cyan-300 border border-cyan-500/30 hover:bg-cyan-500/10 inline-flex items-center gap-1"
           >
             {ship.tracking_doc_number}
             <ExternalLink className="h-3 w-3" />
-          </a>
+          </button>
           <button
             onClick={() => { navigator.clipboard.writeText(ship.tracking_doc_number); toast.success("Copied"); }}
             className="text-slate-500 hover:text-slate-300"
@@ -96,6 +111,16 @@ function ShipmentForm({ value, onChange, showOptional }) {
         <Textarea rows={2} value={value.order_booking_file} onChange={(e) => set({ order_booking_file: e.target.value })} className="mt-1 bg-slate-900 border-slate-800" data-testid="ship-order-input" placeholder="e.g. ZN26148-1, 2x20' FCLs, 50 Plts, 50865.99 Kgs" />
       </div>
       <div>
+        <Label className="text-xs uppercase tracking-wider font-mono text-slate-400">Cargo type</Label>
+        <Select value={value.cargo_type || "FCL"} onValueChange={(v) => set({ cargo_type: v })}>
+          <SelectTrigger className="mt-1 bg-slate-900 border-slate-800" data-testid="ship-cargo-type-select"><SelectValue /></SelectTrigger>
+          <SelectContent className="bg-slate-900 border-slate-800">
+            <SelectItem value="FCL">FCL (Full Container)</SelectItem>
+            <SelectItem value="LCL">LCL (Groupage)</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <div>
         <Label className="text-xs uppercase tracking-wider font-mono text-slate-400">Status</Label>
         <Select value={value.status} onValueChange={(v) => set({ status: v })}>
           <SelectTrigger className="mt-1 bg-slate-900 border-slate-800" data-testid="ship-status-select"><SelectValue /></SelectTrigger>
@@ -114,12 +139,28 @@ function ShipmentForm({ value, onChange, showOptional }) {
         </Select>
       </div>
       <div>
-        <Label className="text-xs uppercase tracking-wider font-mono text-slate-400">Vessel name</Label>
+        <Label className="text-xs uppercase tracking-wider font-mono text-slate-400">Vessel name (1st)</Label>
         <Input value={value.vessel_name} onChange={(e) => set({ vessel_name: e.target.value })} className="mt-1 bg-slate-900 border-slate-800" data-testid="ship-vessel-input" placeholder="e.g. MSC Maya" />
+      </div>
+      <div>
+        <Label className="text-xs uppercase tracking-wider font-mono text-slate-400">Planned ETD (1st vessel)</Label>
+        <Input type="date" value={value.planned_etd || ""} onChange={(e) => set({ planned_etd: e.target.value })} className="mt-1 bg-slate-900 border-slate-800" data-testid="ship-planned-etd-input" />
+      </div>
+      <div>
+        <Label className="text-xs uppercase tracking-wider font-mono text-slate-400">2nd Vessel (transhipment)</Label>
+        <Input value={value.second_vessel_name || ""} onChange={(e) => set({ second_vessel_name: e.target.value })} className="mt-1 bg-slate-900 border-slate-800" data-testid="ship-second-vessel-input" placeholder="Optional" />
+      </div>
+      <div>
+        <Label className="text-xs uppercase tracking-wider font-mono text-slate-400">Planned ETD (2nd vessel)</Label>
+        <Input type="date" value={value.second_vessel_etd || ""} onChange={(e) => set({ second_vessel_etd: e.target.value })} className="mt-1 bg-slate-900 border-slate-800" data-testid="ship-second-etd-input" />
       </div>
       <div>
         <Label className="text-xs uppercase tracking-wider font-mono text-slate-400">Tracking doc # (B/L, Container, Booking)</Label>
         <Input value={value.tracking_doc_number} onChange={(e) => set({ tracking_doc_number: e.target.value })} className="mt-1 bg-slate-900 border-slate-800 font-mono" data-testid="ship-tracking-input" placeholder="MEDU12345678" />
+      </div>
+      <div>
+        <Label className="text-xs uppercase tracking-wider font-mono text-slate-400">Planned ETA</Label>
+        <Input type="date" value={value.planned_eta || ""} onChange={(e) => set({ planned_eta: e.target.value })} className="mt-1 bg-slate-900 border-slate-800" data-testid="ship-planned-eta-input" />
       </div>
       {showOptional.sob_date && (
         <div>
@@ -138,7 +179,7 @@ function ShipmentForm({ value, onChange, showOptional }) {
         <Input value={value.pod} onChange={(e) => set({ pod: e.target.value })} className="mt-1 bg-slate-900 border-slate-800" data-testid="ship-pod-input" placeholder="e.g. Durban" />
       </div>
       <div>
-        <Label className="text-xs uppercase tracking-wider font-mono text-slate-400">ETA</Label>
+        <Label className="text-xs uppercase tracking-wider font-mono text-slate-400">ETA (free text for report)</Label>
         <Input value={value.eta || ""} onChange={(e) => set({ eta: e.target.value })} className="mt-1 bg-slate-900 border-slate-800" data-testid="ship-eta-input" placeholder="e.g. 10.10.2026" />
       </div>
       {showOptional.final_destination && (
@@ -238,10 +279,13 @@ export default function ClientDetail() {
     setEditingShip(s);
     setForm({
       supplier: s.supplier || "", order_booking_file: s.order_booking_file || "",
-      file_number: s.file_number || "", status: s.status || "Booked",
+      file_number: s.file_number || "", cargo_type: s.cargo_type || "FCL",
+      status: s.status || "Booked",
       sob_date: s.sob_date || "", vessel_name: s.vessel_name || "",
       tracking_doc_number: s.tracking_doc_number || "", carrier: s.carrier || "Other",
       pol: s.pol || "", pod: s.pod || "", eta: s.eta || "",
+      planned_etd: s.planned_etd || "", planned_eta: s.planned_eta || "",
+      second_vessel_name: s.second_vessel_name || "", second_vessel_etd: s.second_vessel_etd || "",
       final_destination: s.final_destination || "", comments: s.comments || "",
       hbill_released: s.hbill_released ?? null,
       expected_freight_rate: s.expected_freight_rate || "",

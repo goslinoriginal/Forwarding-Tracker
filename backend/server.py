@@ -4,7 +4,7 @@ import io
 import logging
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated, Any, List, Optional
 from xml.sax.saxutils import escape
@@ -88,6 +88,7 @@ class Shipment(BaseModel):
     supplier: str = ""
     order_booking_file: str = ""
     file_number: str = ""
+    cargo_type: str = "FCL"  # FCL / LCL
     status: str = "Booked"  # Booked / Shipped / Delayed
     sob_date: Optional[str] = None
     vessel_name: str = ""
@@ -96,6 +97,10 @@ class Shipment(BaseModel):
     pol: Optional[str] = None
     pod: str = ""
     eta: Optional[str] = None
+    planned_etd: Optional[str] = None  # ISO date YYYY-MM-DD
+    planned_eta: Optional[str] = None  # ISO date YYYY-MM-DD
+    second_vessel_name: Optional[str] = None
+    second_vessel_etd: Optional[str] = None  # ISO date YYYY-MM-DD
     final_destination: Optional[str] = None
     comments: str = ""
     hbill_released: Optional[bool] = None
@@ -111,6 +116,7 @@ class ShipmentCreate(BaseModel):
     supplier: str = ""
     order_booking_file: str = ""
     file_number: str = ""
+    cargo_type: str = "FCL"
     status: str = "Booked"
     sob_date: Optional[str] = None
     vessel_name: str = ""
@@ -119,6 +125,10 @@ class ShipmentCreate(BaseModel):
     pol: Optional[str] = None
     pod: str = ""
     eta: Optional[str] = None
+    planned_etd: Optional[str] = None
+    planned_eta: Optional[str] = None
+    second_vessel_name: Optional[str] = None
+    second_vessel_etd: Optional[str] = None
     final_destination: Optional[str] = None
     comments: str = ""
     hbill_released: Optional[bool] = None
@@ -129,6 +139,7 @@ class ShipmentUpdate(BaseModel):
     supplier: Optional[str] = None
     order_booking_file: Optional[str] = None
     file_number: Optional[str] = None
+    cargo_type: Optional[str] = None
     status: Optional[str] = None
     sob_date: Optional[str] = None
     vessel_name: Optional[str] = None
@@ -137,6 +148,10 @@ class ShipmentUpdate(BaseModel):
     pol: Optional[str] = None
     pod: Optional[str] = None
     eta: Optional[str] = None
+    planned_etd: Optional[str] = None
+    planned_eta: Optional[str] = None
+    second_vessel_name: Optional[str] = None
+    second_vessel_etd: Optional[str] = None
     final_destination: Optional[str] = None
     comments: Optional[str] = None
     hbill_released: Optional[bool] = None
@@ -235,6 +250,68 @@ async def create_shipment(payload: ShipmentCreate):
     return ship
 
 
+def _fmt_dot_date(iso: str) -> str:
+    """Convert YYYY-MM-DD to DD.MM."""
+    try:
+        d = date.fromisoformat(iso)
+        return f"{d.day:02d}.{d.month:02d}."
+    except Exception:
+        return iso or ""
+
+
+def _auto_delayed_comment(existing: dict, updates: dict) -> tuple[dict, list[str]]:
+    """Detect ETD delay or vessel change; auto-append delayed comment and set status."""
+    appended: list[str] = []
+
+    new_etd = updates.get("planned_etd")
+    old_etd = existing.get("planned_etd")
+    if new_etd and new_etd != old_etd:
+        try:
+            new_d = date.fromisoformat(new_etd)
+            today = date.today()
+            trigger = False
+            if old_etd:
+                old_d = date.fromisoformat(old_etd)
+                if new_d > old_d:
+                    trigger = True
+            elif new_d > today:
+                # First ETD in the future is not a delay — no auto comment
+                trigger = False
+            if trigger:
+                snippet = f"Vessel delayed slightly. Now planned ETD {_fmt_dot_date(new_etd)}"
+                appended.append(snippet)
+                if existing.get("status") != "Shipped":
+                    updates["status"] = "Delayed"
+        except Exception:
+            pass
+
+    new_vessel = updates.get("vessel_name")
+    old_vessel = existing.get("vessel_name")
+    if new_vessel and old_vessel and new_vessel.strip() and new_vessel.strip() != (old_vessel or "").strip():
+        etd_txt = _fmt_dot_date(updates.get("planned_etd") or existing.get("planned_etd") or "")
+        snippet = f"Vessel changed by S/Line to {new_vessel.strip()}. Now planned ETD {etd_txt}".rstrip()
+        appended.append(snippet)
+        if existing.get("status") != "Shipped":
+            updates["status"] = "Delayed"
+
+    new_second = updates.get("second_vessel_name")
+    old_second = existing.get("second_vessel_name")
+    if new_second and new_second.strip() and new_second.strip() != (old_second or "").strip():
+        etd_txt = _fmt_dot_date(updates.get("second_vessel_etd") or existing.get("second_vessel_etd") or "")
+        snippet = f"2nd vessel updated to {new_second.strip()}. Planned ETD {etd_txt}".rstrip()
+        appended.append(snippet)
+
+    if appended:
+        current = (updates.get("comments") if "comments" in updates else existing.get("comments")) or ""
+        current = current.strip()
+        for line in appended:
+            if line and line not in current:
+                current = (current + (". " if current and not current.endswith(".") else " " if current else "") + line).strip()
+        updates["comments"] = current
+
+    return updates, appended
+
+
 @api_router.patch("/shipments/{shipment_id}", response_model=Shipment)
 async def update_shipment(shipment_id: str, payload: ShipmentUpdate):
     existing = await db.shipments.find_one({"id": shipment_id}, _proj())
@@ -245,10 +322,73 @@ async def update_shipment(shipment_id: str, payload: ShipmentUpdate):
         updates["anf_received_at"] = _now_iso()
     if "anf_received" in updates and not updates["anf_received"]:
         updates["anf_received_at"] = None
+    updates, _ = _auto_delayed_comment(existing, updates)
     updates["updated_at"] = _now_iso()
     await db.shipments.update_one({"id": shipment_id}, {"$set": updates})
     doc = await db.shipments.find_one({"id": shipment_id}, _proj())
     return doc
+
+
+def _reminder_for_shipment(s: dict, today: date) -> Optional[dict]:
+    """Return reminder metadata if this shipment needs cargo reporting soon."""
+    if s.get("anf_received"):
+        return None
+    cargo = (s.get("cargo_type") or "FCL").upper()
+    if cargo == "LCL":
+        target_iso = s.get("planned_eta")
+        if not target_iso:
+            return None
+        try:
+            target = date.fromisoformat(target_iso)
+        except Exception:
+            return None
+        days = (target - today).days
+        if days <= 10:
+            return {"kind": "LCL cargo report (10d before ETA)", "target_date": target_iso, "days_left": days}
+        return None
+    # FCL: use second vessel if present, else primary
+    if s.get("second_vessel_name") and s.get("second_vessel_etd"):
+        target_iso = s["second_vessel_etd"]
+        label = f"Cargo report before 2nd vessel {s['second_vessel_name']}"
+    else:
+        target_iso = s.get("planned_etd")
+        label = "Cargo report before departure"
+    if not target_iso:
+        return None
+    try:
+        target = date.fromisoformat(target_iso)
+    except Exception:
+        return None
+    days = (target - today).days
+    if days <= 2:
+        return {"kind": label, "target_date": target_iso, "days_left": days}
+    return None
+
+
+@api_router.get("/dashboard/reminders")
+async def dashboard_reminders():
+    today = date.today()
+    docs = await db.shipments.find({"anf_received": {"$ne": True}}, _proj()).to_list(5000)
+    client_lookup: dict[str, str] = {}
+    async for c in db.clients.find({}, {"_id": 0, "id": 1, "name": 1}):
+        client_lookup[c["id"]] = c["name"]
+    reminders = []
+    for s in docs:
+        r = _reminder_for_shipment(s, today)
+        if r:
+            reminders.append({
+                "shipment_id": s["id"],
+                "client_id": s["client_id"],
+                "client_name": client_lookup.get(s["client_id"], "—"),
+                "supplier": s.get("supplier") or "",
+                "vessel_name": s.get("second_vessel_name") or s.get("vessel_name") or "",
+                "tracking_doc_number": s.get("tracking_doc_number") or "",
+                "carrier": s.get("carrier") or "Other",
+                "cargo_type": s.get("cargo_type") or "FCL",
+                **r,
+            })
+    reminders.sort(key=lambda r: r["days_left"])
+    return {"today": today.isoformat(), "reminders": reminders}
 
 
 @api_router.delete("/shipments/{shipment_id}")
@@ -330,9 +470,12 @@ def _cell_value(key: str, ship: dict) -> str:
         vessel = ship.get("vessel_name") or ""
         doc = ship.get("tracking_doc_number") or ""
         carrier = ship.get("carrier") or ""
+        second = ship.get("second_vessel_name") or ""
         parts = []
         if vessel:
-            parts.append(vessel)
+            parts.append(vessel + (" (1st Vessel)" if second else ""))
+        if second:
+            parts.append(second + " (2nd Vessel)")
         if doc:
             parts.append(doc)
         if carrier and carrier != "Other":
@@ -376,18 +519,19 @@ def _build_xlsx(client_name: str, columns: list[tuple[str, str]], rows: list[dic
     ws = wb.active
     ws.title = "Status Report"
     ws.freeze_panes = "A3"
-    ws.sheet_view.showGridLines = False
+    ws.sheet_view.showGridLines = True
     ws.page_setup.orientation = ws.ORIENTATION_LANDSCAPE
 
-    title = f"Shipment Status Report — {client_name}"
+    title = f"Status Report — {client_name} — {datetime.now(timezone.utc).strftime('%d.%m.%Y')}"
     ws.cell(row=1, column=1, value=title)
-    ws.cell(row=1, column=1).font = Font(bold=True, size=14, color="0F172A")
+    ws.cell(row=1, column=1).font = Font(bold=True, size=13, color="000000")
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(columns))
 
-    thin = Side(style="thin", color="94A3B8")
+    thin = Side(style="thin", color="000000")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
-    header_fill = PatternFill("solid", fgColor="0F172A")
-    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill("solid", fgColor="D9D9D9")
+    header_font = Font(bold=True, color="000000", size=10)
+    body_font = Font(color="000000", size=10)
     body_alignment = Alignment(vertical="top", wrap_text=True)
     header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
@@ -397,7 +541,7 @@ def _build_xlsx(client_name: str, columns: list[tuple[str, str]], rows: list[dic
         cell.font = header_font
         cell.border = border
         cell.alignment = header_alignment
-    ws.row_dimensions[2].height = 28
+    ws.row_dimensions[2].height = 30
 
     widths = [max(14, min(40, len(label) + 4)) for _, label in columns]
     for row_index, row in enumerate(rows, start=3):
@@ -405,6 +549,7 @@ def _build_xlsx(client_name: str, columns: list[tuple[str, str]], rows: list[dic
             value = row.get(key, "") or ""
             cell = ws.cell(row=row_index, column=col_index, value=value)
             cell.border = border
+            cell.font = body_font
             cell.alignment = body_alignment
             if value:
                 longest = max((len(line) + 2) for line in value.splitlines())
@@ -428,20 +573,20 @@ def _build_pdf(client_name: str, columns: list[tuple[str, str]], rows: list[dict
 
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle(
-        "Title", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=14,
-        textColor=colors.HexColor("#0F172A"), spaceAfter=6, alignment=TA_LEFT,
+        "Title", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=13,
+        textColor=colors.black, spaceAfter=6, alignment=TA_LEFT,
     )
     subtitle_style = ParagraphStyle(
         "Subtitle", parent=styles["Normal"], fontName="Helvetica",
-        fontSize=9, textColor=colors.HexColor("#475569"), spaceAfter=8,
+        fontSize=9, textColor=colors.black, spaceAfter=8,
     )
     header_style = ParagraphStyle(
         "Header", parent=styles["Normal"], fontName="Helvetica-Bold",
-        fontSize=8, leading=10, textColor=colors.white, alignment=TA_LEFT,
+        fontSize=9, leading=11, textColor=colors.black, alignment=TA_LEFT,
     )
     body_style = ParagraphStyle(
         "Body", parent=styles["Normal"], fontName="Helvetica",
-        fontSize=8, leading=10, alignment=TA_LEFT, wordWrap="CJK",
+        fontSize=9, leading=11, textColor=colors.black, alignment=TA_LEFT, wordWrap="CJK",
     )
 
     def para(text: str, style: ParagraphStyle) -> Paragraph:
@@ -461,20 +606,19 @@ def _build_pdf(client_name: str, columns: list[tuple[str, str]], rows: list[dict
     date_str = datetime.now(timezone.utc).strftime("%d.%m.%Y")
 
     story = [
-        Paragraph(f"Shipment Status Report — {escape(client_name)}", title_style),
+        Paragraph(f"Status Report — {escape(client_name)}", title_style),
         Paragraph(f"Report date: {date_str}", subtitle_style),
     ]
     table = LongTable(table_data, colWidths=col_widths, repeatRows=1, splitByRow=1)
     table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0F172A")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#94A3B8")),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#D9D9D9")),
+        ("TEXTCOLOR", (0, 0), (-1, -1), colors.black),
+        ("GRID", (0, 0), (-1, -1), 0.6, colors.black),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("LEFTPADDING", (0, 0), (-1, -1), 5),
         ("RIGHTPADDING", (0, 0), (-1, -1), 5),
         ("TOPPADDING", (0, 0), (-1, -1), 5),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F1F5F9")]),
     ]))
     story.append(table)
     doc.build(story)
