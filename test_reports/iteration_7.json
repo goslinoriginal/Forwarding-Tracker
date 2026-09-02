@@ -1,0 +1,18 @@
+{
+  "summary": "Iteration 7 verified: XLSX embedded logo width is now capped at 60% of the visible table pixel width (min 30%) and stays horizontally centered within the table via OneCellAnchor for both Patuma (aspect ~14.6:1) and Clearfreight (aspect ~9.4:1). Row 1 height >= 60. All iter 6 regressions still green (append-comment DD.MM prefix, mark-shipped/mark-delayed prefix refresh, seeded initial comment prefix, Comments column width 32). PDF export still returns 200 with logo (>=40KB) for both companies. 11/11 tests passed.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/test_iter7.py", "/app/test_reports/pytest/iter7.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is ~1025 lines; splitting XLSX/PDF helpers into modules would help maintainability.",
+    "target_w_px formula: min(int(total_px*0.6), int(100*aspect)) — for tall/square logos (aspect near 1) this caps width at 100px which may look small; consider basing the width cap on max(target_h_px*aspect_upper) instead. Not a bug for current Patuma/CF wide banners.",
+    "target_h_px = max(50, int(target_w_px/aspect)) has no explicit max=100 cap in code even though request statement mentions max 100; for extreme aspects the 60% width cap + 100px width-per-unit-aspect ceiling keeps height <= 100 for aspect>=1, but if a taller-than-wide logo were ever supplied, height could exceed 100. Consider adding min(100, ...) for safety."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter7.py"],
+  "success_rate": {"backend": "100%", "frontend": "not tested (backend-only per request)"},
+  "seed_data_creation": "Test shipments created against Flange 2000 client with supplier=TEST_iter7 are cleaned up in the module-scoped fixture teardown.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iter 7 fully green. Logo sizing asserts implemented: image ext.cx/9525 in [0.3*total_px, 0.6*total_px], and left edge (sum of preceding col widths in px + colOff/9525) within 3px of (total_px - img_w)/2. total_px = sum(col.width*7+5) over columns that have a non-null header in row 4. Existing clients Flange 2000 (Patuma) 61aa6ac3-... and CF Traders (Clearfreight) b2d8c8cc-... continue to work end-to-end for XLSX and PDF exports."
+}

@@ -372,10 +372,11 @@ export default function ClientDetail() {
     } catch { toast.error("Failed to mark shipped"); }
   };
 
-  const insertQuickComment = (s, snippet) => {
-    const base = s.comments?.trim();
-    const next = base ? `${base}${base.endsWith(".") ? " " : ". "}${snippet}` : snippet;
-    patchShip(s.id, { comments: next });
+  const insertQuickComment = async (s, snippet) => {
+    try {
+      await api.post(`/shipments/${s.id}/append-comment`, { snippet });
+      load();
+    } catch { toast.error("Failed to append comment"); }
   };
 
   const downloadReport = async (fmt) => {

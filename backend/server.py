@@ -4,6 +4,7 @@ import io
 import logging
 import os
 import uuid
+import re
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated, Any, List, Optional
@@ -309,6 +310,19 @@ def _append_comment(existing: str, snippet: str) -> str:
     return f"{current}{sep} {snippet}"
 
 
+_DATE_PREFIX_RE = re.compile(r"^\d{1,2}\.\d{1,2}\.?\s*-\s*")
+
+
+def _refresh_date_prefix(text: str) -> str:
+    """Ensure comment starts with today's 'DD.MM - ' prefix, replacing any existing date prefix."""
+    today = date.today()
+    prefix = f"{today.day:02d}.{today.month:02d} - "
+    stripped = _DATE_PREFIX_RE.sub("", (text or "").strip())
+    if not stripped:
+        return prefix.rstrip()
+    return prefix + stripped
+
+
 
 
 
@@ -320,7 +334,7 @@ async def mark_shipped(shipment_id: str, payload: MarkShippedPayload):
     sob_iso = _to_iso_or_original(payload.sob_date)
     sob_dd_mm = _fmt_dot_date(sob_iso) or payload.sob_date
     snippet = f"SOB {sob_dd_mm} Awaiting ANF."
-    new_comment = _append_comment(existing.get("comments", ""), snippet)
+    new_comment = _refresh_date_prefix(_append_comment(existing.get("comments", ""), snippet))
     updates = {
         "sob_date": sob_iso,
         "status": "Shipped",
@@ -340,7 +354,7 @@ async def mark_delayed(shipment_id: str, payload: MarkDelayedPayload):
     new_etd_iso = _to_iso_or_original(payload.new_etd)
     dd_mm = _fmt_dot_date(new_etd_iso) or payload.new_etd
     snippet = f"Vessel delayed slightly. Now planned ETD {dd_mm}"
-    new_comment = _append_comment(existing.get("comments", ""), snippet)
+    new_comment = _refresh_date_prefix(_append_comment(existing.get("comments", ""), snippet))
     updates = {
         "planned_etd": new_etd_iso,
         "status": "Delayed" if existing.get("status") != "Shipped" else existing.get("status"),
@@ -348,6 +362,21 @@ async def mark_delayed(shipment_id: str, payload: MarkDelayedPayload):
         "updated_at": _now_iso(),
     }
     await db.shipments.update_one({"id": shipment_id}, {"$set": updates})
+    doc = await db.shipments.find_one({"id": shipment_id}, _proj())
+    return doc
+
+
+class AppendCommentPayload(BaseModel):
+    snippet: str
+
+
+@api_router.post("/shipments/{shipment_id}/append-comment", response_model=Shipment)
+async def append_comment(shipment_id: str, payload: AppendCommentPayload):
+    existing = await db.shipments.find_one({"id": shipment_id}, _proj())
+    if not existing:
+        raise HTTPException(status_code=404, detail="Shipment not found")
+    new_comment = _refresh_date_prefix(_append_comment(existing.get("comments", ""), payload.snippet.strip()))
+    await db.shipments.update_one({"id": shipment_id}, {"$set": {"comments": new_comment, "updated_at": _now_iso()}})
     doc = await db.shipments.find_one({"id": shipment_id}, _proj())
     return doc
 
@@ -679,19 +708,51 @@ def _build_xlsx(client: dict, columns: list[tuple[str, str]], rows: list[dict]) 
     thin = Side(style="thin", color="000000")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
-    # Row 1: Logo image
+    # Row 1: Logo image (bigger + horizontally centered across merged range)
     logo_path = co.get("logo")
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncols)
-    ws.row_dimensions[1].height = 54
+    ws.row_dimensions[1].height = 80
+
+    # Pre-compute compact column widths so we know total width
+    min_widths = {
+        "supplier": 14, "order_booking_file": 22, "file_number": 10,
+        "status": 12, "sob_date": 10, "vessel_block": 18,
+        "pol": 10, "eta": 10, "final_destination": 14,
+        "comments": 32, "copy_docs_status": 14,
+        "hbill_released": 8, "expected_freight_rate": 12,
+    }
+    widths = [min_widths.get(key, 12) for key, _ in columns]
+
     if logo_path and os.path.exists(logo_path):
         try:
+            from openpyxl.drawing.spreadsheet_drawing import OneCellAnchor, AnchorMarker
+            from openpyxl.drawing.xdr import XDRPositiveSize2D
+            from openpyxl.utils.units import pixels_to_EMU
             img = XLImage(logo_path)
-            # scale to width 480 keeping aspect ratio
             orig_w, orig_h = img.width, img.height
-            target_w = 480
-            img.width = target_w
-            img.height = int(orig_h * (target_w / orig_w))
-            img.anchor = "A1"
+            aspect = orig_w / orig_h if orig_h else 10
+            # Cap logo to 60% of table width AND 100px max height, keep aspect ratio
+            total_px = sum(int(w * 7 + 5) for w in widths)
+            max_w = int(total_px * 0.6)
+            target_w_px = min(max_w, int(100 * aspect))
+            target_h_px = max(50, int(target_w_px / aspect))
+            offset_px = max(0, (total_px - target_w_px) // 2)
+            # Walk columns to find anchor col + column offset
+            anchor_col = 0
+            running = 0
+            col_off = 0
+            for i, w in enumerate(widths):
+                col_px = int(w * 7 + 5)
+                if running + col_px > offset_px:
+                    anchor_col = i
+                    col_off = offset_px - running
+                    break
+                running += col_px
+            ws.row_dimensions[1].height = max(60, int(target_h_px * 0.78))
+            img.anchor = OneCellAnchor(
+                _from=AnchorMarker(col=anchor_col, colOff=pixels_to_EMU(col_off), row=0, rowOff=pixels_to_EMU(2)),
+                ext=XDRPositiveSize2D(cx=pixels_to_EMU(target_w_px), cy=pixels_to_EMU(target_h_px)),
+            )
             ws.add_image(img)
         except Exception as exc:
             logger.warning("Failed to embed logo: %s", exc)
@@ -755,15 +816,6 @@ def _build_xlsx(client: dict, columns: list[tuple[str, str]], rows: list[dict]) 
     # Data rows
     body_font = Font(color="000000", size=10)
     body_align = Alignment(vertical="center", wrap_text=True, horizontal="center")
-    # Per-column min widths tuned for freight tracker labels
-    min_widths = {
-        "supplier": 18, "order_booking_file": 26, "file_number": 12,
-        "status": 14, "sob_date": 14, "vessel_block": 22,
-        "pol": 14, "eta": 14, "final_destination": 18,
-        "comments": 42, "copy_docs_status": 18,
-        "hbill_released": 12, "expected_freight_rate": 16,
-    }
-    widths = [max(min_widths.get(key, 14), len(label) + 4) for key, label in columns]
     for row_index, row in enumerate(rows, start=5):
         max_lines = 1
         for col_index, (key, _) in enumerate(columns, start=1):
@@ -774,9 +826,6 @@ def _build_xlsx(client: dict, columns: list[tuple[str, str]], rows: list[dict]) 
             c.alignment = body_align
             if value:
                 lines = value.splitlines()
-                longest = max((len(line) + 2) for line in lines)
-                widths[col_index - 1] = max(widths[col_index - 1], min(longest, min_widths.get(key, 14)))
-                # rough estimate of wrapped lines given the column width
                 colw = widths[col_index - 1]
                 wrapped = sum(max(1, -(-len(line) // max(colw - 2, 1))) for line in lines)
                 max_lines = max(max_lines, wrapped)
