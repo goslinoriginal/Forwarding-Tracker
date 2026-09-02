@@ -1,0 +1,18 @@
+{
+  "summary": "Iteration 5 tests all passing. Verified: (1) PDF/XLSX now embed PNG logos for both Patuma (65KB PDF / 59KB XLSX with xl/media/image1.png) and Clearfreight (58KB PDF); (2) client-detail table fits within 1440px viewport with no horizontal overflow (containerScrollWidth==clientWidth==1134); (3) Excel Comments column width==42 and row height==56 with wrap_text=True and no bleed into H/bill; (4) vessel_block preview no longer contains '[MSC]' - exact 'Marianna\\nMEDUADK75346'; (5) Status API round-trip works for 'Planned' (create + PATCH); frontend Status dropdown has all 4 options Planned/Booked/Shipped/Delayed; (6) ETA input in new-shipment dialog has type='date'.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/test_iter5.py", "/app/test_reports/pytest/iter5.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is 978 lines - consider splitting reports/pdf/xlsx helpers into a separate module.",
+    "STATUS_OPTIONS constant is defined but not enforced by Pydantic — backend accepts any status string. Consider using Literal[...] for validation.",
+    "In _build_xlsx the min_widths logic uses min(longest, min_widths[key]) which effectively caps the width at the floor - this appears to be intentional as a hard cap for wrapping, but the naming is misleading (min_widths acts as both a floor via max() and a ceiling via min())."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter5.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Test shipments created and deleted within tests (TEST_iter5, TEST_planned, TEST_widecomment). No residual data.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "All 5 iteration bug fixes verified end-to-end. Backend tests in /app/backend/tests/test_iter5.py cover companies logos, vessel_block bracket removal, Planned status round-trip, PDF/XLSX logo embedding, and Excel comments layout. Existing clients: Flange 2000 (Patuma, id=61aa6ac3-3adb-44a7-832b-94799a99faf7), CF Traders (Clearfreight, id=b2d8c8cc-f981-4ea8-954c-cef5422cf3ce)."
+}

@@ -14,6 +14,7 @@ from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from motor.motor_asyncio import AsyncIOMotorClient
 from openpyxl import Workbook
+from openpyxl.drawing.image import Image as XLImage
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from pydantic import BaseModel, ConfigDict, Field
@@ -22,7 +23,7 @@ from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.pagesizes import A3, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
-from reportlab.platypus import LongTable, Paragraph, SimpleDocTemplate, TableStyle
+from reportlab.platypus import Image as RLImage, LongTable, Paragraph, SimpleDocTemplate, Spacer, TableStyle
 from starlette.middleware.cors import CORSMiddleware
 
 
@@ -58,14 +59,18 @@ COMPANIES = {
         "suffix": "(PTY) LTD",
         "tagline": "SPECIALISED FORWARDING & SHIPPING CONSULTANCY",
         "reg": "Reg. No.1992/003670/07",
+        "logo": str(ROOT_DIR / "static" / "logos" / "patuma.png"),
     },
     "Clearfreight": {
         "name": "CLEARFREIGHT",
         "suffix": "(PTY) LTD",
-        "tagline": "SPECIALISED FORWARDING & SHIPPING CONSULTANCY",
-        "reg": "",
+        "tagline": "INTERNATIONAL CLEARING & FORWARDING AGENTS",
+        "reg": "Reg. No. 91/04800/07",
+        "logo": str(ROOT_DIR / "static" / "logos" / "clearfreight.png"),
     },
 }
+
+STATUS_OPTIONS = ["Planned", "Booked", "Shipped", "Delayed"]
 
 
 # ---------- Models ----------
@@ -304,19 +309,7 @@ def _append_comment(existing: str, snippet: str) -> str:
     return f"{current}{sep} {snippet}"
 
 
-def _to_iso_or_original(text: str) -> str:
-    """Accept 'YYYY-MM-DD' or 'DD.MM.YYYY' or 'DD.MM.' — return YYYY-MM-DD if parseable else original."""
-    text = (text or "").strip()
-    try:
-        return date.fromisoformat(text).isoformat()
-    except Exception:
-        pass
-    for fmt in ("%d.%m.%Y", "%d/%m/%Y"):
-        try:
-            return datetime.strptime(text, fmt).date().isoformat()
-        except Exception:
-            continue
-    return text
+
 
 
 @api_router.post("/shipments/{shipment_id}/mark-shipped", response_model=Shipment)
@@ -366,6 +359,30 @@ def _fmt_dot_date(iso: str) -> str:
         return f"{d.day:02d}.{d.month:02d}."
     except Exception:
         return iso or ""
+
+
+def _fmt_dot_full(iso: str) -> str:
+    """Convert YYYY-MM-DD to DD.MM.YYYY."""
+    try:
+        d = date.fromisoformat(iso)
+        return f"{d.day:02d}.{d.month:02d}.{d.year}"
+    except Exception:
+        return ""
+
+
+def _to_iso_or_original(text: str) -> str:
+    """Accept 'YYYY-MM-DD' or 'DD.MM.YYYY' or 'DD.MM.' — return YYYY-MM-DD if parseable else original."""
+    text = (text or "").strip()
+    try:
+        return date.fromisoformat(text).isoformat()
+    except Exception:
+        pass
+    for fmt in ("%d.%m.%Y", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(text, fmt).date().isoformat()
+        except Exception:
+            continue
+    return text
 
 
 def _auto_delayed_comment(existing: dict, updates: dict) -> tuple[dict, list[str]]:
@@ -579,7 +596,6 @@ def _cell_value(key: str, ship: dict) -> str:
     if key == "vessel_block":
         vessel = ship.get("vessel_name") or ""
         doc = ship.get("tracking_doc_number") or ""
-        carrier = ship.get("carrier") or ""
         second = ship.get("second_vessel_name") or ""
         parts = []
         if vessel:
@@ -588,9 +604,23 @@ def _cell_value(key: str, ship: dict) -> str:
             parts.append(second + " (2nd Vessel)")
         if doc:
             parts.append(doc)
-        if carrier and carrier != "Other":
-            parts.append(f"[{carrier}]")
         return "\n".join(parts)
+    if key == "eta":
+        val = ship.get("eta")
+        if val:
+            iso = _to_iso_or_original(val)
+            fmt = _fmt_dot_full(iso)
+            return fmt or val
+        pe = ship.get("planned_eta")
+        if pe:
+            return _fmt_dot_full(pe) or pe
+        return ""
+    if key == "sob_date":
+        val = ship.get("sob_date")
+        if val:
+            iso = _to_iso_or_original(val)
+            return _fmt_dot_full(iso) or val
+        return ""
     if key == "hbill_released":
         value = ship.get("hbill_released")
         if value is None:
@@ -649,77 +679,93 @@ def _build_xlsx(client: dict, columns: list[tuple[str, str]], rows: list[dict]) 
     thin = Side(style="thin", color="000000")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
 
-    # Row 1: Company name + suffix
+    # Row 1: Logo image
+    logo_path = co.get("logo")
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncols)
-    cell = ws.cell(row=1, column=1, value=f"{co['name']} {co['suffix']}")
-    cell.font = Font(bold=True, size=24, color="000000")
-    cell.alignment = Alignment(horizontal="center", vertical="center")
-    ws.row_dimensions[1].height = 34
+    ws.row_dimensions[1].height = 54
+    if logo_path and os.path.exists(logo_path):
+        try:
+            img = XLImage(logo_path)
+            # scale to width 480 keeping aspect ratio
+            orig_w, orig_h = img.width, img.height
+            target_w = 480
+            img.width = target_w
+            img.height = int(orig_h * (target_w / orig_w))
+            img.anchor = "A1"
+            ws.add_image(img)
+        except Exception as exc:
+            logger.warning("Failed to embed logo: %s", exc)
+            fallback = ws.cell(row=1, column=1, value=f"{co['name']} {co['suffix']}")
+            fallback.font = Font(bold=True, size=24, color="000000")
+            fallback.alignment = Alignment(horizontal="center", vertical="center")
+    else:
+        cell = ws.cell(row=1, column=1, value=f"{co['name']} {co['suffix']}")
+        cell.font = Font(bold=True, size=24, color="000000")
+        cell.alignment = Alignment(horizontal="center", vertical="center")
 
-    # Row 2: Tagline + reg
+    # Row 2: SHIPPING REPORT blue banner
     ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=ncols)
-    tagline = co["tagline"] + (f"  {co['reg']}" if co["reg"] else "")
-    cell = ws.cell(row=2, column=1, value=tagline)
-    cell.font = Font(bold=True, size=10, color="000000")
-    cell.alignment = Alignment(horizontal="center", vertical="center")
-    ws.row_dimensions[2].height = 18
-
-    # Row 3: SHIPPING REPORT blue banner
-    ws.merge_cells(start_row=3, start_column=1, end_row=3, end_column=ncols)
-    cell = ws.cell(row=3, column=1, value="SHIPPING REPORT")
+    cell = ws.cell(row=2, column=1, value="SHIPPING REPORT")
     cell.fill = PatternFill("solid", fgColor="0000CC")
     cell.font = Font(bold=True, size=16, color="33CCFF")
     cell.alignment = Alignment(horizontal="center", vertical="center")
-    ws.row_dimensions[3].height = 26
+    ws.row_dimensions[2].height = 26
 
-    # Row 4: Date + yellow spacer + Client: + name
-    # Layout: col 1 = date, cols 2..(mid-1) = yellow, mid = "Client:", (mid+1)..end = name
-    date_cols = 1
+    # Row 3: Date + yellow spacer + Client: + name
     client_label_col = max(2, ncols - 3)
     yellow_start = 2
     yellow_end = client_label_col - 1
     name_start = client_label_col + 1
 
-    ws.cell(row=4, column=1, value=date_str)
-    ws.cell(row=4, column=1).fill = PatternFill("solid", fgColor="99CCFF")
-    ws.cell(row=4, column=1).font = Font(bold=True, size=11, color="000000")
-    ws.cell(row=4, column=1).alignment = Alignment(horizontal="center", vertical="center")
+    ws.cell(row=3, column=1, value=date_str)
+    ws.cell(row=3, column=1).fill = PatternFill("solid", fgColor="99CCFF")
+    ws.cell(row=3, column=1).font = Font(bold=True, size=11, color="000000")
+    ws.cell(row=3, column=1).alignment = Alignment(horizontal="center", vertical="center")
 
     if yellow_end >= yellow_start:
-        ws.merge_cells(start_row=4, start_column=yellow_start, end_row=4, end_column=yellow_end)
-        yc = ws.cell(row=4, column=yellow_start)
+        ws.merge_cells(start_row=3, start_column=yellow_start, end_row=3, end_column=yellow_end)
+        yc = ws.cell(row=3, column=yellow_start)
         yc.fill = PatternFill("solid", fgColor="FFFF00")
 
-    ws.cell(row=4, column=client_label_col, value="Client:")
-    ws.cell(row=4, column=client_label_col).fill = PatternFill("solid", fgColor="99CCFF")
-    ws.cell(row=4, column=client_label_col).font = Font(bold=True, size=11, color="000000")
-    ws.cell(row=4, column=client_label_col).alignment = Alignment(horizontal="center", vertical="center")
+    ws.cell(row=3, column=client_label_col, value="Client:")
+    ws.cell(row=3, column=client_label_col).fill = PatternFill("solid", fgColor="99CCFF")
+    ws.cell(row=3, column=client_label_col).font = Font(bold=True, size=11, color="000000")
+    ws.cell(row=3, column=client_label_col).alignment = Alignment(horizontal="center", vertical="center")
 
     if name_start <= ncols:
-        ws.merge_cells(start_row=4, start_column=name_start, end_row=4, end_column=ncols)
-        nc = ws.cell(row=4, column=name_start, value=client.get("name", ""))
+        ws.merge_cells(start_row=3, start_column=name_start, end_row=3, end_column=ncols)
+        nc = ws.cell(row=3, column=name_start, value=client.get("name", ""))
         nc.fill = PatternFill("solid", fgColor="66CCFF")
         nc.font = Font(bold=True, size=11, color="000000")
         nc.alignment = Alignment(horizontal="center", vertical="center")
-    ws.row_dimensions[4].height = 22
+    ws.row_dimensions[3].height = 22
 
-    # Row 5: Table header — dark blue bg, cyan bold underlined text
+    # Row 4: Table header — dark blue bg, cyan bold underlined text
     header_fill = PatternFill("solid", fgColor="0033CC")
     header_font = Font(bold=True, color="33CCFF", size=10, underline="single")
     header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
     for col_index, (_, label) in enumerate(columns, start=1):
-        c = ws.cell(row=5, column=col_index, value=label)
+        c = ws.cell(row=4, column=col_index, value=label)
         c.fill = header_fill
         c.font = header_font
         c.alignment = header_align
         c.border = border
-    ws.row_dimensions[5].height = 34
+    ws.row_dimensions[4].height = 34
 
     # Data rows
     body_font = Font(color="000000", size=10)
     body_align = Alignment(vertical="center", wrap_text=True, horizontal="center")
-    widths = [max(14, min(40, len(label) + 4)) for _, label in columns]
-    for row_index, row in enumerate(rows, start=6):
+    # Per-column min widths tuned for freight tracker labels
+    min_widths = {
+        "supplier": 18, "order_booking_file": 26, "file_number": 12,
+        "status": 14, "sob_date": 14, "vessel_block": 22,
+        "pol": 14, "eta": 14, "final_destination": 18,
+        "comments": 42, "copy_docs_status": 18,
+        "hbill_released": 12, "expected_freight_rate": 16,
+    }
+    widths = [max(min_widths.get(key, 14), len(label) + 4) for key, label in columns]
+    for row_index, row in enumerate(rows, start=5):
+        max_lines = 1
         for col_index, (key, _) in enumerate(columns, start=1):
             value = row.get(key, "") or ""
             c = ws.cell(row=row_index, column=col_index, value=value)
@@ -727,13 +773,18 @@ def _build_xlsx(client: dict, columns: list[tuple[str, str]], rows: list[dict]) 
             c.font = body_font
             c.alignment = body_align
             if value:
-                longest = max((len(line) + 2) for line in value.splitlines())
-                widths[col_index - 1] = min(50, max(widths[col_index - 1], longest))
-        ws.row_dimensions[row_index].height = 60
+                lines = value.splitlines()
+                longest = max((len(line) + 2) for line in lines)
+                widths[col_index - 1] = max(widths[col_index - 1], min(longest, min_widths.get(key, 14)))
+                # rough estimate of wrapped lines given the column width
+                colw = widths[col_index - 1]
+                wrapped = sum(max(1, -(-len(line) // max(colw - 2, 1))) for line in lines)
+                max_lines = max(max_lines, wrapped)
+        ws.row_dimensions[row_index].height = max(48, min(180, 16 * max_lines + 8))
 
     for i, w in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
-    ws.freeze_panes = "A6"
+    ws.freeze_panes = "A5"
 
     buffer = io.BytesIO()
     wb.save(buffer)
@@ -792,16 +843,24 @@ def _build_pdf(client: dict, columns: list[tuple[str, str]], rows: list[dict]) -
 
     story: list = []
 
-    # Company name row (full width)
-    company_html = (
-        f'<font size="24"><b>{escape(co["name"])}</b></font>'
-        f' <font size="14"><b>{escape(co["suffix"])}</b></font>'
-    )
-    story.append(Paragraph(company_html, company_style))
-    tag_html = escape(co["tagline"]) + (
-        f'&nbsp;&nbsp;<font size="8">{escape(co["reg"])}</font>' if co["reg"] else ""
-    )
-    story.append(Paragraph(tag_html, tagline_style))
+    # Row 1: Logo image (falls back to text if missing)
+    logo_path = co.get("logo")
+    if logo_path and os.path.exists(logo_path):
+        try:
+            from PIL import Image as PILImage
+            pil = PILImage.open(logo_path)
+            aspect = pil.width / pil.height if pil.height else 10
+            target_w = 500
+            target_h = target_w / aspect
+            logo = RLImage(logo_path, width=target_w, height=target_h)
+            logo.hAlign = "CENTER"
+            story.append(logo)
+            story.append(Spacer(1, 4))
+        except Exception as exc:
+            logger.warning("Logo embed failed: %s", exc)
+            story.append(Paragraph(f"<b>{escape(co['name'])} {escape(co['suffix'])}</b>", company_style))
+    else:
+        story.append(Paragraph(f"<b>{escape(co['name'])} {escape(co['suffix'])}</b>", company_style))
 
     # Blue "SHIPPING REPORT" banner
     banner = LongTable(

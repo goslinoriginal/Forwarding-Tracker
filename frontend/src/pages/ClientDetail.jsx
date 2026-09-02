@@ -35,9 +35,16 @@ const emptyShipment = {
   hbill_released: null, expected_freight_rate: "", copy_docs_status: "",
 };
 
+const STATUS_STYLES_LOCAL = {
+  Planned: "bg-slate-500/10 text-slate-300 border-slate-500/30",
+  Booked: "bg-amber-500/10 text-amber-300 border-amber-500/30",
+  Shipped: "bg-emerald-500/10 text-emerald-300 border-emerald-500/30",
+  Delayed: "bg-rose-500/10 text-rose-300 border-rose-500/30",
+};
+
 function StatusBadge({ status }) {
   return (
-    <span className={`text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border ${STATUS_STYLES[status] || STATUS_STYLES.Booked}`}>
+    <span className={`text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border ${STATUS_STYLES_LOCAL[status] || STATUS_STYLES_LOCAL.Booked}`}>
       {status}
     </span>
   );
@@ -106,34 +113,23 @@ function VesselCell({ ship }) {
     window.open(carrierTrackUrl(ship.carrier, num), "_blank", "noopener,noreferrer");
   };
   return (
-    <div className="min-w-[180px] leading-tight">
-      <div className="font-semibold text-slate-100 text-sm truncate">
+    <div className="leading-tight">
+      <div className="font-semibold text-slate-100 text-xs truncate">
         {ship.vessel_name || <span className="text-slate-600 italic font-normal">no vessel</span>}
-        {ship.second_vessel_name && <span className="text-[10px] text-slate-500 font-normal ml-1">(1st)</span>}
       </div>
       {ship.second_vessel_name && (
-        <div className="text-xs text-slate-300 mt-0.5">
-          {ship.second_vessel_name} <span className="text-[10px] text-slate-500">(2nd)</span>
-        </div>
+        <div className="text-[11px] text-slate-300 truncate">{ship.second_vessel_name}</div>
       )}
       {ship.tracking_doc_number && (
-        <div className="mt-1 flex items-center gap-1.5">
+        <div className="mt-0.5 flex items-center gap-1">
           <button
             onClick={openCarrier}
             data-testid={`track-trace-link-${ship.id}`}
             title={`Open ${ship.carrier} tracking & copy number`}
-            className="font-mono text-[11px] font-semibold px-1.5 py-0.5 rounded bg-slate-800 text-cyan-300 border border-cyan-500/30 hover:bg-cyan-500/10 inline-flex items-center gap-1"
+            className="font-mono text-[10px] font-semibold px-1 py-0.5 rounded bg-slate-800 text-cyan-300 border border-cyan-500/30 hover:bg-cyan-500/10 inline-flex items-center gap-1 truncate max-w-[110px]"
           >
-            {ship.tracking_doc_number}
-            <ExternalLink className="h-3 w-3" />
-          </button>
-          <button
-            onClick={() => { navigator.clipboard.writeText(ship.tracking_doc_number); toast.success("Copied"); }}
-            className="text-slate-500 hover:text-slate-300"
-            data-testid={`copy-doc-${ship.id}`}
-            title="Copy tracking doc"
-          >
-            <Copy className="h-3 w-3" />
+            <span className="truncate">{ship.tracking_doc_number}</span>
+            <ExternalLink className="h-2.5 w-2.5 shrink-0" />
           </button>
         </div>
       )}
@@ -172,7 +168,7 @@ function ShipmentForm({ value, onChange, showOptional }) {
         <Select value={value.status} onValueChange={(v) => set({ status: v })}>
           <SelectTrigger className="mt-1 bg-slate-900 border-slate-800" data-testid="ship-status-select"><SelectValue /></SelectTrigger>
           <SelectContent className="bg-slate-900 border-slate-800">
-            {["Booked", "Shipped", "Delayed"].map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+            {["Planned", "Booked", "Shipped", "Delayed"].map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
           </SelectContent>
         </Select>
       </div>
@@ -226,8 +222,8 @@ function ShipmentForm({ value, onChange, showOptional }) {
         <Input value={value.pod} onChange={(e) => set({ pod: e.target.value })} className="mt-1 bg-slate-900 border-slate-800" data-testid="ship-pod-input" placeholder="e.g. Durban" />
       </div>
       <div>
-        <Label className="text-xs uppercase tracking-wider font-mono text-slate-400">ETA (free text for report)</Label>
-        <Input value={value.eta || ""} onChange={(e) => set({ eta: e.target.value })} className="mt-1 bg-slate-900 border-slate-800" data-testid="ship-eta-input" placeholder="e.g. 10.10.2026" />
+        <Label className="text-xs uppercase tracking-wider font-mono text-slate-400">ETA</Label>
+        <Input type="date" value={value.eta || ""} onChange={(e) => set({ eta: e.target.value })} className="mt-1 bg-slate-900 border-slate-800" data-testid="ship-eta-input" />
       </div>
       {showOptional.final_destination && (
         <div>
@@ -492,8 +488,24 @@ export default function ClientDetail() {
         </div>
       ) : (
         <div className="rounded-lg border border-slate-800 bg-slate-950 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full data-table text-sm">
+          <div className="w-full">
+            <table className="w-full data-table text-xs table-fixed">
+              <colgroup>
+                <col className="w-[8%]" />
+                <col className="w-[12%]" />
+                <col className="w-[6%]" />
+                <col className="w-[7%]" />
+                {showOptional.sob_date && <col className="w-[7%]" />}
+                <col className="w-[11%]" />
+                {showOptional.pol && <col className="w-[6%]" />}
+                <col className="w-[7%]" />
+                {showOptional.final_destination && <col className="w-[7%]" />}
+                <col />
+                {showOptional.copy_docs_status && <col className="w-[8%]" />}
+                {showOptional.hbill_released && <col className="w-[5%]" />}
+                {showOptional.expected_freight_rate && <col className="w-[7%]" />}
+                <col className="w-[9%]" />
+              </colgroup>
               <thead>
                 <tr className="bg-slate-900/90 border-b border-slate-800">
                   {[
@@ -504,12 +516,12 @@ export default function ClientDetail() {
                     "DBN Port ETA",
                     ...(showOptional.final_destination ? ["Final Destination"] : []),
                     "Comments",
-                    ...(showOptional.copy_docs_status ? ["Copy Docs Status"] : []),
+                    ...(showOptional.copy_docs_status ? ["Copy Docs"] : []),
                     ...(showOptional.hbill_released ? ["H/bill"] : []),
-                    ...(showOptional.expected_freight_rate ? ["Freight Rate"] : []),
+                    ...(showOptional.expected_freight_rate ? ["Rate"] : []),
                     "Actions",
                   ].map((h) => (
-                    <th key={h} className="text-left px-3 py-2.5 text-[10px] font-mono uppercase tracking-widest text-slate-500 border-r border-slate-800 last:border-r-0 whitespace-nowrap">{h}</th>
+                    <th key={h} className="text-left px-1.5 py-2 text-[9px] font-mono uppercase tracking-widest text-slate-500 border-r border-slate-800 last:border-r-0 whitespace-nowrap overflow-hidden">{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -520,31 +532,30 @@ export default function ClientDetail() {
                     className={`border-b border-slate-800 align-top ${s.anf_received ? "bg-purple-500/5" : idx % 2 === 0 ? "bg-slate-950" : "bg-slate-900/40"}`}
                     data-testid={`shipment-row-${s.id}`}
                   >
-                    <td className="px-3 py-2.5 text-slate-200 max-w-[180px]">{s.supplier}</td>
-                    <td className="px-3 py-2.5 text-slate-300 max-w-[260px] whitespace-pre-wrap text-xs leading-relaxed">{s.order_booking_file}</td>
-                    <td className="px-3 py-2.5 font-mono text-xs text-slate-300 whitespace-nowrap">{s.file_number}</td>
-                    <td className="px-3 py-2.5"><StatusBadge status={s.status} /></td>
-                    {showOptional.sob_date && <td className="px-3 py-2.5 font-mono text-xs text-slate-300 whitespace-nowrap">{s.sob_date}</td>}
-                    <td className="px-3 py-2.5">
+                    <td className="px-1.5 py-2 text-slate-200 text-xs break-words" title={s.supplier}>{s.supplier}</td>
+                    <td className="px-1.5 py-2 text-slate-300 whitespace-pre-wrap text-[11px] leading-snug break-words">{s.order_booking_file}</td>
+                    <td className="px-1.5 py-2 font-mono text-[11px] text-slate-300 break-words">{s.file_number}</td>
+                    <td className="px-1.5 py-2"><StatusBadge status={s.status} /></td>
+                    {showOptional.sob_date && <td className="px-1.5 py-2 font-mono text-[11px] text-slate-300 break-words">{s.sob_date}</td>}
+                    <td className="px-1.5 py-2">
                       <VesselCell ship={s} />
-                      <div className="mt-1.5"><CarrierBadge carrier={s.carrier} /></div>
                     </td>
-                    {showOptional.pol && <td className="px-3 py-2.5 text-slate-300 whitespace-nowrap">{s.pol}</td>}
-                    <td className="px-3 py-2.5 font-mono text-xs text-slate-300 whitespace-nowrap">{s.eta}</td>
-                    {showOptional.final_destination && <td className="px-3 py-2.5 text-slate-300 whitespace-nowrap">{s.final_destination}</td>}
-                    <td className="px-3 py-2.5 min-w-[280px] max-w-[420px]">
+                    {showOptional.pol && <td className="px-1.5 py-2 text-slate-300 text-xs break-words">{s.pol}</td>}
+                    <td className="px-1.5 py-2 font-mono text-[11px] text-slate-300 break-words">{s.eta}</td>
+                    {showOptional.final_destination && <td className="px-1.5 py-2 text-slate-300 text-xs break-words">{s.final_destination}</td>}
+                    <td className="px-1.5 py-2">
                       <Textarea
                         value={s.comments || ""}
                         onChange={(e) => setShipments((prev) => prev.map((x) => x.id === s.id ? { ...x, comments: e.target.value } : x))}
                         onBlur={(e) => patchShip(s.id, { comments: e.target.value })}
-                        rows={2}
-                        className="bg-slate-900/60 border-slate-800 text-xs min-h-[52px] resize-y"
+                        rows={3}
+                        className="bg-slate-900/60 border-slate-800 text-[11px] min-h-[60px] resize-y w-full"
                         data-testid={`comments-textarea-${s.id}`}
                       />
                       <Popover>
                         <PopoverTrigger asChild>
-                          <button className="mt-1.5 inline-flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider text-cyan-400 hover:text-cyan-300" data-testid={`quick-comment-${s.id}`}>
-                            <MessageSquarePlus className="h-3 w-3" /> Insert preset
+                          <button className="mt-1 inline-flex items-center gap-1 text-[9px] font-mono uppercase tracking-wider text-cyan-400 hover:text-cyan-300" data-testid={`quick-comment-${s.id}`}>
+                            <MessageSquarePlus className="h-3 w-3" /> Preset
                           </button>
                         </PopoverTrigger>
                         <PopoverContent align="start" className="w-72 bg-slate-950 border-slate-800 p-2">
@@ -563,28 +574,28 @@ export default function ClientDetail() {
                       </Popover>
                     </td>
                     {showOptional.copy_docs_status && (
-                      <td className="px-3 py-2.5 text-xs text-slate-300 max-w-[180px]">
+                      <td className="px-1.5 py-2 text-[11px] text-slate-300">
                         <Input
                           value={s.copy_docs_status || ""}
                           onChange={(e) => setShipments((prev) => prev.map((x) => x.id === s.id ? { ...x, copy_docs_status: e.target.value } : x))}
                           onBlur={(e) => patchShip(s.id, { copy_docs_status: e.target.value })}
-                          className="bg-slate-900/60 border-slate-800 text-xs h-8"
+                          className="bg-slate-900/60 border-slate-800 text-[11px] h-7 w-full"
                           placeholder="—"
                           data-testid={`copy-docs-${s.id}`}
                         />
                       </td>
                     )}
                     {showOptional.hbill_released && (
-                      <td className="px-3 py-2.5">
+                      <td className="px-1.5 py-2 text-center">
                         {s.hbill_released === true ? <span className="text-emerald-400 text-xs">Yes</span> :
                          s.hbill_released === false ? <span className="text-rose-400 text-xs">No</span> :
                          <span className="text-slate-500 text-xs">—</span>}
                       </td>
                     )}
-                    {showOptional.expected_freight_rate && <td className="px-3 py-2.5 font-mono text-xs text-slate-300 whitespace-nowrap">{s.expected_freight_rate}</td>}
-                    <td className="px-3 py-2.5">
-                      <div className="flex flex-col gap-1.5">
-                        <div className="flex items-center gap-1.5 flex-wrap">
+                    {showOptional.expected_freight_rate && <td className="px-1.5 py-2 font-mono text-[11px] text-slate-300 break-words">{s.expected_freight_rate}</td>}
+                    <td className="px-1.5 py-2">
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-1 flex-wrap">
                           <DatePickerButton
                             label="Delayed"
                             icon={AlertTriangle}
@@ -604,16 +615,16 @@ export default function ClientDetail() {
                         </div>
                         <div className="flex items-center gap-1">
                           {!s.anf_received ? (
-                            <Button size="sm" variant="ghost" onClick={() => markAnf(s)} className="h-7 px-2 text-purple-300 hover:bg-purple-500/10" data-testid={`mark-anf-${s.id}`} title="Mark ANF received. Docs to Ops.">
+                            <Button size="sm" variant="ghost" onClick={() => markAnf(s)} className="h-6 px-1.5 text-purple-300 hover:bg-purple-500/10" data-testid={`mark-anf-${s.id}`} title="ANF received">
                               <PackageCheck className="h-3.5 w-3.5" />
                             </Button>
                           ) : (
                             <span className="text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-300 border border-purple-500/40">ANF</span>
                           )}
-                          <Button size="sm" variant="ghost" onClick={() => startEdit(s)} className="h-7 px-2 text-slate-400 hover:text-slate-200" data-testid={`edit-shipment-${s.id}`}>Edit</Button>
+                          <Button size="sm" variant="ghost" onClick={() => startEdit(s)} className="h-6 px-1.5 text-slate-400 hover:text-slate-200 text-[10px]" data-testid={`edit-shipment-${s.id}`}>Edit</Button>
                           <AlertDialog>
                             <AlertDialogTrigger asChild>
-                              <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-slate-500 hover:text-rose-400" data-testid={`delete-shipment-${s.id}`}>
+                              <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-slate-500 hover:text-rose-400" data-testid={`delete-shipment-${s.id}`}>
                                 <Trash2 className="h-3.5 w-3.5" />
                               </Button>
                             </AlertDialogTrigger>
