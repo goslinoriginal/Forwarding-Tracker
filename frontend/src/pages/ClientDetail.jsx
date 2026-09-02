@@ -15,6 +15,7 @@ import {
 import {
   Popover, PopoverContent, PopoverTrigger,
 } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
@@ -22,7 +23,7 @@ import {
 import { toast } from "sonner";
 import {
   ArrowLeft, Plus, ExternalLink, FileSpreadsheet, FileText, MessageSquarePlus, PackageCheck,
-  Ship, Trash2, Copy, Anchor,
+  Ship, Trash2, Copy, Anchor, CalendarClock, Sailboat, AlertTriangle,
 } from "lucide-react";
 
 const emptyShipment = {
@@ -31,7 +32,7 @@ const emptyShipment = {
   pol: "", pod: "", eta: "", planned_etd: "", planned_eta: "",
   second_vessel_name: "", second_vessel_etd: "",
   final_destination: "", comments: "",
-  hbill_released: null, expected_freight_rate: "",
+  hbill_released: null, expected_freight_rate: "", copy_docs_status: "",
 };
 
 function StatusBadge({ status }) {
@@ -47,6 +48,52 @@ function CarrierBadge({ carrier }) {
     <span className={`text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border ${CARRIER_STYLES[carrier] || CARRIER_STYLES.Other}`}>
       {carrier || "Other"}
     </span>
+  );
+}
+
+function toISO(d) {
+  if (!d) return "";
+  const dt = new Date(d);
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, "0");
+  const day = String(dt.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function DatePickerButton({ label, icon: Icon, tone, onPick, testid, disabled }) {
+  const [open, setOpen] = useState(false);
+  const tones = {
+    rose: "text-rose-300 hover:bg-rose-500/10 border-rose-500/30",
+    emerald: "text-emerald-300 hover:bg-emerald-500/10 border-emerald-500/30",
+  };
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          disabled={disabled}
+          data-testid={testid}
+          title={label}
+          className={`inline-flex items-center gap-1 h-7 px-2 rounded border text-[10px] font-mono uppercase tracking-wider transition-colors ${tones[tone]} ${disabled ? "opacity-40 cursor-not-allowed" : ""}`}
+        >
+          <Icon className="h-3 w-3" />
+          {label}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-auto bg-slate-950 border-slate-800 p-0">
+        <div className="px-3 py-2 border-b border-slate-800 text-[10px] font-mono uppercase tracking-widest text-slate-500">
+          Pick date for: {label}
+        </div>
+        <Calendar
+          mode="single"
+          onSelect={(d) => {
+            if (!d) return;
+            setOpen(false);
+            onPick(toISO(d));
+          }}
+          initialFocus
+        />
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -194,6 +241,12 @@ function ShipmentForm({ value, onChange, showOptional }) {
           <Input value={value.expected_freight_rate || ""} onChange={(e) => set({ expected_freight_rate: e.target.value })} className="mt-1 bg-slate-900 border-slate-800" data-testid="ship-rate-input" placeholder="$3500/20'" />
         </div>
       )}
+      {showOptional.copy_docs_status && (
+        <div>
+          <Label className="text-xs uppercase tracking-wider font-mono text-slate-400">Copy docs status</Label>
+          <Input value={value.copy_docs_status || ""} onChange={(e) => set({ copy_docs_status: e.target.value })} className="mt-1 bg-slate-900 border-slate-800" data-testid="ship-copy-docs-input" placeholder="e.g. Copies sent 05.09." />
+        </div>
+      )}
       {showOptional.hbill_released && (
         <div>
           <Label className="text-xs uppercase tracking-wider font-mono text-slate-400">H/bill released by supplier</Label>
@@ -289,6 +342,7 @@ export default function ClientDetail() {
       final_destination: s.final_destination || "", comments: s.comments || "",
       hbill_released: s.hbill_released ?? null,
       expected_freight_rate: s.expected_freight_rate || "",
+      copy_docs_status: s.copy_docs_status || "",
     });
     setOpenEdit(true);
   };
@@ -304,6 +358,22 @@ export default function ClientDetail() {
       : (s.comments || "ANF received. Docs to Ops.");
     await patchShip(s.id, { anf_received: true, comments: nextComment });
     toast.success("Marked ANF received — will drop off next report");
+  };
+
+  const markDelayed = async (s, isoDate) => {
+    try {
+      await api.post(`/shipments/${s.id}/mark-delayed`, { new_etd: isoDate });
+      toast.success("Marked delayed — comment auto-added");
+      load();
+    } catch { toast.error("Failed to mark delayed"); }
+  };
+
+  const markShipped = async (s, isoDate) => {
+    try {
+      await api.post(`/shipments/${s.id}/mark-shipped`, { sob_date: isoDate });
+      toast.success("Marked shipped — SOB comment added");
+      load();
+    } catch { toast.error("Failed to mark shipped"); }
   };
 
   const insertQuickComment = (s, snippet) => {
@@ -344,7 +414,12 @@ export default function ClientDetail() {
           <Link to="/clients" className="inline-flex items-center gap-1 text-xs font-mono text-slate-500 hover:text-slate-300" data-testid="back-clients">
             <ArrowLeft className="h-3 w-3" /> Back to clients
           </Link>
-          <div className="font-mono text-[11px] tracking-widest uppercase text-cyan-400/80 mt-2">/client · status report</div>
+          <div className="font-mono text-[11px] tracking-widest uppercase text-cyan-400/80 mt-2 flex items-center gap-2">
+            <span>/client · status report</span>
+            <span className={`px-1.5 py-0.5 rounded border ${client.company === "Clearfreight" ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/30" : "bg-cyan-500/10 text-cyan-300 border-cyan-500/30"}`}>
+              {client.company || "Patuma"}
+            </span>
+          </div>
           <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-slate-100 truncate flex items-center gap-3">
             <Anchor className="h-6 w-6 text-cyan-400" /> {client.name}
           </h1>
@@ -422,15 +497,16 @@ export default function ClientDetail() {
               <thead>
                 <tr className="bg-slate-900/90 border-b border-slate-800">
                   {[
-                    "Supplier", "Order / Booking file", "File #", "Status",
-                    ...(showOptional.sob_date ? ["SOB date"] : []),
+                    "Supplier", "Order", "Booking File", "Shipped/Pending",
+                    ...(showOptional.sob_date ? ["SOB DATE/RCG"] : []),
                     "Vessel",
                     ...(showOptional.pol ? ["POL"] : []),
-                    "POD", "ETA",
-                    ...(showOptional.final_destination ? ["Destination"] : []),
+                    "DBN Port ETA",
+                    ...(showOptional.final_destination ? ["Final Destination"] : []),
                     "Comments",
+                    ...(showOptional.copy_docs_status ? ["Copy Docs Status"] : []),
                     ...(showOptional.hbill_released ? ["H/bill"] : []),
-                    ...(showOptional.expected_freight_rate ? ["Freight $"] : []),
+                    ...(showOptional.expected_freight_rate ? ["Freight Rate"] : []),
                     "Actions",
                   ].map((h) => (
                     <th key={h} className="text-left px-3 py-2.5 text-[10px] font-mono uppercase tracking-widest text-slate-500 border-r border-slate-800 last:border-r-0 whitespace-nowrap">{h}</th>
@@ -454,7 +530,6 @@ export default function ClientDetail() {
                       <div className="mt-1.5"><CarrierBadge carrier={s.carrier} /></div>
                     </td>
                     {showOptional.pol && <td className="px-3 py-2.5 text-slate-300 whitespace-nowrap">{s.pol}</td>}
-                    <td className="px-3 py-2.5 text-slate-300 whitespace-nowrap">{s.pod}</td>
                     <td className="px-3 py-2.5 font-mono text-xs text-slate-300 whitespace-nowrap">{s.eta}</td>
                     {showOptional.final_destination && <td className="px-3 py-2.5 text-slate-300 whitespace-nowrap">{s.final_destination}</td>}
                     <td className="px-3 py-2.5 min-w-[280px] max-w-[420px]">
@@ -487,6 +562,18 @@ export default function ClientDetail() {
                         </PopoverContent>
                       </Popover>
                     </td>
+                    {showOptional.copy_docs_status && (
+                      <td className="px-3 py-2.5 text-xs text-slate-300 max-w-[180px]">
+                        <Input
+                          value={s.copy_docs_status || ""}
+                          onChange={(e) => setShipments((prev) => prev.map((x) => x.id === s.id ? { ...x, copy_docs_status: e.target.value } : x))}
+                          onBlur={(e) => patchShip(s.id, { copy_docs_status: e.target.value })}
+                          className="bg-slate-900/60 border-slate-800 text-xs h-8"
+                          placeholder="—"
+                          data-testid={`copy-docs-${s.id}`}
+                        />
+                      </td>
+                    )}
                     {showOptional.hbill_released && (
                       <td className="px-3 py-2.5">
                         {s.hbill_released === true ? <span className="text-emerald-400 text-xs">Yes</span> :
@@ -496,32 +583,52 @@ export default function ClientDetail() {
                     )}
                     {showOptional.expected_freight_rate && <td className="px-3 py-2.5 font-mono text-xs text-slate-300 whitespace-nowrap">{s.expected_freight_rate}</td>}
                     <td className="px-3 py-2.5">
-                      <div className="flex items-center gap-1">
-                        {!s.anf_received ? (
-                          <Button size="sm" variant="ghost" onClick={() => markAnf(s)} className="h-7 px-2 text-purple-300 hover:bg-purple-500/10" data-testid={`mark-anf-${s.id}`} title="Mark ANF received. Docs to Ops.">
-                            <PackageCheck className="h-3.5 w-3.5" />
-                          </Button>
-                        ) : (
-                          <span className="text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-300 border border-purple-500/40">ANF</span>
-                        )}
-                        <Button size="sm" variant="ghost" onClick={() => startEdit(s)} className="h-7 px-2 text-slate-400 hover:text-slate-200" data-testid={`edit-shipment-${s.id}`}>Edit</Button>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-slate-500 hover:text-rose-400" data-testid={`delete-shipment-${s.id}`}>
-                              <Trash2 className="h-3.5 w-3.5" />
+                      <div className="flex flex-col gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <DatePickerButton
+                            label="Delayed"
+                            icon={AlertTriangle}
+                            tone="rose"
+                            onPick={(iso) => markDelayed(s, iso)}
+                            testid={`mark-delayed-${s.id}`}
+                            disabled={s.anf_received}
+                          />
+                          <DatePickerButton
+                            label="Shipped"
+                            icon={Sailboat}
+                            tone="emerald"
+                            onPick={(iso) => markShipped(s, iso)}
+                            testid={`mark-shipped-${s.id}`}
+                            disabled={s.anf_received}
+                          />
+                        </div>
+                        <div className="flex items-center gap-1">
+                          {!s.anf_received ? (
+                            <Button size="sm" variant="ghost" onClick={() => markAnf(s)} className="h-7 px-2 text-purple-300 hover:bg-purple-500/10" data-testid={`mark-anf-${s.id}`} title="Mark ANF received. Docs to Ops.">
+                              <PackageCheck className="h-3.5 w-3.5" />
                             </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent className="bg-slate-950 border-slate-800">
-                            <AlertDialogHeader>
-                              <AlertDialogTitle className="text-slate-100">Delete shipment?</AlertDialogTitle>
-                              <AlertDialogDescription className="text-slate-400">This can&apos;t be undone.</AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel className="border-slate-700 bg-slate-900">Cancel</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => removeShip(s.id)} className="bg-rose-600 hover:bg-rose-500" data-testid={`confirm-delete-ship-${s.id}`}>Delete</AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
+                          ) : (
+                            <span className="text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-300 border border-purple-500/40">ANF</span>
+                          )}
+                          <Button size="sm" variant="ghost" onClick={() => startEdit(s)} className="h-7 px-2 text-slate-400 hover:text-slate-200" data-testid={`edit-shipment-${s.id}`}>Edit</Button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-slate-500 hover:text-rose-400" data-testid={`delete-shipment-${s.id}`}>
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent className="bg-slate-950 border-slate-800">
+                              <AlertDialogHeader>
+                                <AlertDialogTitle className="text-slate-100">Delete shipment?</AlertDialogTitle>
+                                <AlertDialogDescription className="text-slate-400">This can&apos;t be undone.</AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel className="border-slate-700 bg-slate-900">Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => removeShip(s.id)} className="bg-rose-600 hover:bg-rose-500" data-testid={`confirm-delete-ship-${s.id}`}>Delete</AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
                       </div>
                     </td>
                   </tr>

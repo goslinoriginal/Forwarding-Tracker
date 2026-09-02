@@ -26,11 +26,17 @@ export const STATUS_STYLES = {
 };
 
 export const OPTIONAL_COLUMNS = [
-  { key: "sob_date", label: "SOB Date / RCG" },
+  { key: "sob_date", label: "SOB DATE/RCG" },
   { key: "pol", label: "POL (Port of Loading)" },
   { key: "final_destination", label: "Final Destination" },
   { key: "hbill_released", label: "H/bill Released by Supplier" },
+  { key: "copy_docs_status", label: "Copy Docs Status" },
   { key: "expected_freight_rate", label: "Expected Freight Rate" },
+];
+
+export const COMPANIES = [
+  { key: "Patuma", label: "Patuma Freight (PTY) LTD" },
+  { key: "Clearfreight", label: "Clearfreight (PTY) LTD" },
 ];
 
 export const QUICK_COMMENTS = [

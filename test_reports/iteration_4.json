@@ -1,0 +1,19 @@
+{
+  "summary": "Iteration 4: Tested workflow-based comment builder (auto-seed on create, mark-shipped, mark-delayed endpoints + UI). All 12 backend pytest tests pass. Frontend flow verified end-to-end on Flange 2000 client — auto-seed comment renders correctly ('02.09 - Planned ETD 25.11.'), Delayed button opens Calendar Popover and appends 'Vessel delayed slightly. Now planned ETD 20.09.', Shipped button appends 'SOB 15.09. Awaiting ANF.', all in a single row's comments after picking a date.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/test_iter4.py", "/app/test_reports/pytest/iter4.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is 918 lines — approaching the 700-line threshold; consider splitting into routers (clients, shipments, reports) for maintainability.",
+    "The delayed snippet 'Vessel delayed slightly. Now planned ETD 20.09.' (from _append_comment) does not itself end with a period before _append_comment; _append_comment adds sep only between existing and snippet, so the final comment may not end with period if snippet doesn't. Not a bug per spec (spec says either is fine), but inconsistent with SOB snippet which does end in period.",
+    "_fmt_dot_date is defined after being used inside create_shipment (works at runtime due to Python late binding but reads oddly)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "No auth required",
+  "seed_data_creation": "Ephemeral TEST_iter4_client client created and torn down by pytest module fixture; UI test created a shipment 'TEST_UI_AutoSeed4' under Flange 2000 and deleted it.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "New endpoints: POST /api/shipments/{id}/mark-shipped {sob_date} and POST /api/shipments/{id}/mark-delayed {new_etd}. Both accept ISO or DD.MM.YYYY. UI buttons: data-testid mark-delayed-{id} (rose) and mark-shipped-{id} (emerald). Calendar day buttons: 'button[name=day]'. All working."
+}

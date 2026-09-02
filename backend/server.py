@@ -44,12 +44,28 @@ logger = logging.getLogger("tracker")
 DEFAULT_OPTIONAL_COLUMNS = {
     "hbill_released": False,
     "expected_freight_rate": False,
+    "copy_docs_status": False,
     "final_destination": True,
     "sob_date": True,
     "pol": False,
 }
 
 CARRIERS = ["MSC", "Maersk", "ONE", "COSCO", "Hapag Lloyd", "PIL", "CMA CGM", "Vanguard", "Other"]
+
+COMPANIES = {
+    "Patuma": {
+        "name": "PATUMA FREIGHT",
+        "suffix": "(PTY) LTD",
+        "tagline": "SPECIALISED FORWARDING & SHIPPING CONSULTANCY",
+        "reg": "Reg. No.1992/003670/07",
+    },
+    "Clearfreight": {
+        "name": "CLEARFREIGHT",
+        "suffix": "(PTY) LTD",
+        "tagline": "SPECIALISED FORWARDING & SHIPPING CONSULTANCY",
+        "reg": "",
+    },
+}
 
 
 # ---------- Models ----------
@@ -61,6 +77,7 @@ class Client(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
+    company: str = "Patuma"  # Patuma or Clearfreight
     contact_email: Optional[str] = None
     notes: Optional[str] = None
     optional_columns: dict = Field(default_factory=lambda: dict(DEFAULT_OPTIONAL_COLUMNS))
@@ -69,6 +86,7 @@ class Client(BaseModel):
 
 class ClientCreate(BaseModel):
     name: str
+    company: str = "Patuma"
     contact_email: Optional[str] = None
     notes: Optional[str] = None
     optional_columns: Optional[dict] = None
@@ -76,6 +94,7 @@ class ClientCreate(BaseModel):
 
 class ClientUpdate(BaseModel):
     name: Optional[str] = None
+    company: Optional[str] = None
     contact_email: Optional[str] = None
     notes: Optional[str] = None
     optional_columns: Optional[dict] = None
@@ -105,6 +124,7 @@ class Shipment(BaseModel):
     comments: str = ""
     hbill_released: Optional[bool] = None
     expected_freight_rate: Optional[str] = None
+    copy_docs_status: Optional[str] = None
     anf_received: bool = False
     anf_received_at: Optional[str] = None
     created_at: str = Field(default_factory=_now_iso)
@@ -133,6 +153,7 @@ class ShipmentCreate(BaseModel):
     comments: str = ""
     hbill_released: Optional[bool] = None
     expected_freight_rate: Optional[str] = None
+    copy_docs_status: Optional[str] = None
 
 
 class ShipmentUpdate(BaseModel):
@@ -156,6 +177,7 @@ class ShipmentUpdate(BaseModel):
     comments: Optional[str] = None
     hbill_released: Optional[bool] = None
     expected_freight_rate: Optional[str] = None
+    copy_docs_status: Optional[str] = None
     anf_received: Optional[bool] = None
 
 
@@ -188,8 +210,10 @@ async def create_client(payload: ClientCreate):
     optional_columns = dict(DEFAULT_OPTIONAL_COLUMNS)
     if payload.optional_columns:
         optional_columns.update({k: bool(v) for k, v in payload.optional_columns.items() if k in DEFAULT_OPTIONAL_COLUMNS})
+    company = payload.company if payload.company in COMPANIES else "Patuma"
     client_obj = Client(
         name=payload.name,
+        company=company,
         contact_email=payload.contact_email,
         notes=payload.notes,
         optional_columns=optional_columns,
@@ -211,6 +235,8 @@ async def update_client(client_id: str, payload: ClientUpdate):
         value = getattr(payload, field)
         if value is not None:
             updates[field] = value
+    if payload.company is not None and payload.company in COMPANIES:
+        updates["company"] = payload.company
     if payload.optional_columns is not None:
         merged = dict(existing.get("optional_columns") or DEFAULT_OPTIONAL_COLUMNS)
         for k, v in payload.optional_columns.items():
@@ -220,6 +246,11 @@ async def update_client(client_id: str, payload: ClientUpdate):
     if updates:
         await db.clients.update_one({"id": client_id}, {"$set": updates})
     return await _get_client(client_id)
+
+
+@api_router.get("/companies")
+async def list_companies():
+    return {"companies": [{"key": k, **v} for k, v in COMPANIES.items()]}
 
 
 @api_router.delete("/clients/{client_id}")
@@ -245,9 +276,87 @@ async def list_shipments(client_id: Optional[str] = None, include_anf: bool = Tr
 @api_router.post("/shipments", response_model=Shipment)
 async def create_shipment(payload: ShipmentCreate):
     await _get_client(payload.client_id)
-    ship = Shipment(**payload.model_dump())
+    data = payload.model_dump()
+    # Seed the initial comment "DD.MM - Planned ETD DD.MM." when planned_etd is set and no comment provided
+    if (not data.get("comments")) and data.get("planned_etd"):
+        today = date.today()
+        data["comments"] = f"{today.day:02d}.{today.month:02d} - Planned ETD {_fmt_dot_date(data['planned_etd'])}"
+    ship = Shipment(**data)
     await db.shipments.insert_one(ship.model_dump())
     return ship
+
+
+class MarkShippedPayload(BaseModel):
+    sob_date: str  # DD.MM.YYYY or YYYY-MM-DD
+
+
+class MarkDelayedPayload(BaseModel):
+    new_etd: str  # YYYY-MM-DD
+
+
+def _append_comment(existing: str, snippet: str) -> str:
+    current = (existing or "").strip()
+    if snippet and snippet in current:
+        return current
+    if not current:
+        return snippet
+    sep = "" if current.endswith(".") else "."
+    return f"{current}{sep} {snippet}"
+
+
+def _to_iso_or_original(text: str) -> str:
+    """Accept 'YYYY-MM-DD' or 'DD.MM.YYYY' or 'DD.MM.' — return YYYY-MM-DD if parseable else original."""
+    text = (text or "").strip()
+    try:
+        return date.fromisoformat(text).isoformat()
+    except Exception:
+        pass
+    for fmt in ("%d.%m.%Y", "%d/%m/%Y"):
+        try:
+            return datetime.strptime(text, fmt).date().isoformat()
+        except Exception:
+            continue
+    return text
+
+
+@api_router.post("/shipments/{shipment_id}/mark-shipped", response_model=Shipment)
+async def mark_shipped(shipment_id: str, payload: MarkShippedPayload):
+    existing = await db.shipments.find_one({"id": shipment_id}, _proj())
+    if not existing:
+        raise HTTPException(status_code=404, detail="Shipment not found")
+    sob_iso = _to_iso_or_original(payload.sob_date)
+    sob_dd_mm = _fmt_dot_date(sob_iso) or payload.sob_date
+    snippet = f"SOB {sob_dd_mm} Awaiting ANF."
+    new_comment = _append_comment(existing.get("comments", ""), snippet)
+    updates = {
+        "sob_date": sob_iso,
+        "status": "Shipped",
+        "comments": new_comment,
+        "updated_at": _now_iso(),
+    }
+    await db.shipments.update_one({"id": shipment_id}, {"$set": updates})
+    doc = await db.shipments.find_one({"id": shipment_id}, _proj())
+    return doc
+
+
+@api_router.post("/shipments/{shipment_id}/mark-delayed", response_model=Shipment)
+async def mark_delayed(shipment_id: str, payload: MarkDelayedPayload):
+    existing = await db.shipments.find_one({"id": shipment_id}, _proj())
+    if not existing:
+        raise HTTPException(status_code=404, detail="Shipment not found")
+    new_etd_iso = _to_iso_or_original(payload.new_etd)
+    dd_mm = _fmt_dot_date(new_etd_iso) or payload.new_etd
+    snippet = f"Vessel delayed slightly. Now planned ETD {dd_mm}"
+    new_comment = _append_comment(existing.get("comments", ""), snippet)
+    updates = {
+        "planned_etd": new_etd_iso,
+        "status": "Delayed" if existing.get("status") != "Shipped" else existing.get("status"),
+        "comments": new_comment,
+        "updated_at": _now_iso(),
+    }
+    await db.shipments.update_one({"id": shipment_id}, {"$set": updates})
+    doc = await db.shipments.find_one({"id": shipment_id}, _proj())
+    return doc
 
 
 def _fmt_dot_date(iso: str) -> str:
@@ -432,18 +541,18 @@ async def dashboard_stats():
 # ---------- Report Export Helpers ----------
 STANDARD_COLUMNS = [
     ("supplier", "Supplier"),
-    ("order_booking_file", "Order / Booking File"),
-    ("file_number", "File #"),
-    ("status", "Shipped / Pending"),
-    ("sob_date", "SOB Date / RCG"),
+    ("order_booking_file", "Order"),
+    ("file_number", "Booking File"),
+    ("status", "Shipped/Pending"),
+    ("sob_date", "SOB DATE/RCG"),
     ("vessel_block", "Vessel"),
     ("pol", "POL"),
-    ("pod", "POD (Port)"),
-    ("eta", "ETA"),
+    ("eta", "DBN Port ETA"),
     ("final_destination", "Final Destination"),
     ("comments", "Comments"),
+    ("copy_docs_status", "Copy Docs Status"),
     ("hbill_released", "H/bill Released by Supplier"),
-    ("expected_freight_rate", "Expected Freight Rate"),
+    ("expected_freight_rate", "EXPECTED FREIGHT RATE per container"),
 ]
 
 OPTIONAL_KEYS = {
@@ -452,6 +561,7 @@ OPTIONAL_KEYS = {
     "final_destination": "final_destination",
     "hbill_released": "hbill_released",
     "expected_freight_rate": "expected_freight_rate",
+    "copy_docs_status": "copy_docs_status",
 }
 
 
@@ -507,120 +617,258 @@ async def _report_rows(client_id: str):
 async def preview_report(client_id: str):
     client, columns, rows = await _report_rows(client_id)
     return {
-        "client": {"id": client["id"], "name": client["name"]},
+        "client": {"id": client["id"], "name": client["name"], "company": client.get("company", "Patuma")},
         "date": datetime.now(timezone.utc).strftime("%d.%m.%Y"),
         "columns": [{"key": k, "label": l} for k, l in columns],
         "rows": rows,
     }
 
 
-def _build_xlsx(client_name: str, columns: list[tuple[str, str]], rows: list[dict]) -> bytes:
+# Palette for the branded report (matches original spreadsheet)
+_C_DEEP_BLUE = colors.HexColor("#0000CC")
+_C_DEEP_HEADER = colors.HexColor("#0033CC")
+_C_CYAN_TEXT = colors.HexColor("#33CCFF")
+_C_LIGHT_BOX = colors.HexColor("#99CCFF")
+_C_LIGHT_BOX_2 = colors.HexColor("#66CCFF")
+_C_YELLOW = colors.HexColor("#FFFF00")
+_C_GREY = colors.HexColor("#808080")
+
+
+def _build_xlsx(client: dict, columns: list[tuple[str, str]], rows: list[dict]) -> bytes:
     wb = Workbook()
     ws = wb.active
-    ws.title = "Status Report"
-    ws.freeze_panes = "A3"
-    ws.sheet_view.showGridLines = True
+    ws.title = "Shipping Report"
+    ws.sheet_view.showGridLines = False
     ws.page_setup.orientation = ws.ORIENTATION_LANDSCAPE
 
-    title = f"Status Report — {client_name} — {datetime.now(timezone.utc).strftime('%d.%m.%Y')}"
-    ws.cell(row=1, column=1, value=title)
-    ws.cell(row=1, column=1).font = Font(bold=True, size=13, color="000000")
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(columns))
+    company_key = client.get("company", "Patuma")
+    co = COMPANIES.get(company_key, COMPANIES["Patuma"])
+    ncols = len(columns)
+    date_str = datetime.now(timezone.utc).strftime("%d.%m.%Y")
 
     thin = Side(style="thin", color="000000")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
-    header_fill = PatternFill("solid", fgColor="D9D9D9")
-    header_font = Font(bold=True, color="000000", size=10)
-    body_font = Font(color="000000", size=10)
-    body_alignment = Alignment(vertical="top", wrap_text=True)
-    header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
+    # Row 1: Company name + suffix
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncols)
+    cell = ws.cell(row=1, column=1, value=f"{co['name']} {co['suffix']}")
+    cell.font = Font(bold=True, size=24, color="000000")
+    cell.alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 34
+
+    # Row 2: Tagline + reg
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=ncols)
+    tagline = co["tagline"] + (f"  {co['reg']}" if co["reg"] else "")
+    cell = ws.cell(row=2, column=1, value=tagline)
+    cell.font = Font(bold=True, size=10, color="000000")
+    cell.alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[2].height = 18
+
+    # Row 3: SHIPPING REPORT blue banner
+    ws.merge_cells(start_row=3, start_column=1, end_row=3, end_column=ncols)
+    cell = ws.cell(row=3, column=1, value="SHIPPING REPORT")
+    cell.fill = PatternFill("solid", fgColor="0000CC")
+    cell.font = Font(bold=True, size=16, color="33CCFF")
+    cell.alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[3].height = 26
+
+    # Row 4: Date + yellow spacer + Client: + name
+    # Layout: col 1 = date, cols 2..(mid-1) = yellow, mid = "Client:", (mid+1)..end = name
+    date_cols = 1
+    client_label_col = max(2, ncols - 3)
+    yellow_start = 2
+    yellow_end = client_label_col - 1
+    name_start = client_label_col + 1
+
+    ws.cell(row=4, column=1, value=date_str)
+    ws.cell(row=4, column=1).fill = PatternFill("solid", fgColor="99CCFF")
+    ws.cell(row=4, column=1).font = Font(bold=True, size=11, color="000000")
+    ws.cell(row=4, column=1).alignment = Alignment(horizontal="center", vertical="center")
+
+    if yellow_end >= yellow_start:
+        ws.merge_cells(start_row=4, start_column=yellow_start, end_row=4, end_column=yellow_end)
+        yc = ws.cell(row=4, column=yellow_start)
+        yc.fill = PatternFill("solid", fgColor="FFFF00")
+
+    ws.cell(row=4, column=client_label_col, value="Client:")
+    ws.cell(row=4, column=client_label_col).fill = PatternFill("solid", fgColor="99CCFF")
+    ws.cell(row=4, column=client_label_col).font = Font(bold=True, size=11, color="000000")
+    ws.cell(row=4, column=client_label_col).alignment = Alignment(horizontal="center", vertical="center")
+
+    if name_start <= ncols:
+        ws.merge_cells(start_row=4, start_column=name_start, end_row=4, end_column=ncols)
+        nc = ws.cell(row=4, column=name_start, value=client.get("name", ""))
+        nc.fill = PatternFill("solid", fgColor="66CCFF")
+        nc.font = Font(bold=True, size=11, color="000000")
+        nc.alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[4].height = 22
+
+    # Row 5: Table header — dark blue bg, cyan bold underlined text
+    header_fill = PatternFill("solid", fgColor="0033CC")
+    header_font = Font(bold=True, color="33CCFF", size=10, underline="single")
+    header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
     for col_index, (_, label) in enumerate(columns, start=1):
-        cell = ws.cell(row=2, column=col_index, value=label)
-        cell.fill = header_fill
-        cell.font = header_font
-        cell.border = border
-        cell.alignment = header_alignment
-    ws.row_dimensions[2].height = 30
+        c = ws.cell(row=5, column=col_index, value=label)
+        c.fill = header_fill
+        c.font = header_font
+        c.alignment = header_align
+        c.border = border
+    ws.row_dimensions[5].height = 34
 
+    # Data rows
+    body_font = Font(color="000000", size=10)
+    body_align = Alignment(vertical="center", wrap_text=True, horizontal="center")
     widths = [max(14, min(40, len(label) + 4)) for _, label in columns]
-    for row_index, row in enumerate(rows, start=3):
+    for row_index, row in enumerate(rows, start=6):
         for col_index, (key, _) in enumerate(columns, start=1):
             value = row.get(key, "") or ""
-            cell = ws.cell(row=row_index, column=col_index, value=value)
-            cell.border = border
-            cell.font = body_font
-            cell.alignment = body_alignment
+            c = ws.cell(row=row_index, column=col_index, value=value)
+            c.border = border
+            c.font = body_font
+            c.alignment = body_align
             if value:
                 longest = max((len(line) + 2) for line in value.splitlines())
                 widths[col_index - 1] = min(50, max(widths[col_index - 1], longest))
+        ws.row_dimensions[row_index].height = 60
 
     for i, w in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
+    ws.freeze_panes = "A6"
 
     buffer = io.BytesIO()
     wb.save(buffer)
     return buffer.getvalue()
 
 
-def _build_pdf(client_name: str, columns: list[tuple[str, str]], rows: list[dict]) -> bytes:
+def _build_pdf(client: dict, columns: list[tuple[str, str]], rows: list[dict]) -> bytes:
     page_width, page_height = landscape(A3)
-    margin = 12 * mm
+    margin = 10 * mm
     available_width = page_width - (2 * margin)
 
-    weights = [max(10, min(28, len(label) + 6)) for _, label in columns]
+    weights = [max(9, min(28, len(label) + 6)) for _, label in columns]
     col_widths = [available_width * w / sum(weights) for w in weights]
 
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle(
-        "Title", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=13,
-        textColor=colors.black, spaceAfter=6, alignment=TA_LEFT,
+    company_style = ParagraphStyle(
+        "Company", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=24,
+        textColor=colors.black, alignment=1, spaceAfter=0, leading=26,
     )
-    subtitle_style = ParagraphStyle(
-        "Subtitle", parent=styles["Normal"], fontName="Helvetica",
-        fontSize=9, textColor=colors.black, spaceAfter=8,
+    suffix_style = ParagraphStyle(
+        "Suffix", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=14,
+        textColor=colors.black, alignment=1, spaceAfter=0, leading=18,
+    )
+    tagline_style = ParagraphStyle(
+        "Tagline", parent=styles["Normal"], fontName="Helvetica-Bold", fontSize=10,
+        textColor=colors.black, alignment=1, leading=12, spaceAfter=4,
+    )
+    banner_style = ParagraphStyle(
+        "Banner", parent=styles["Normal"], fontName="Helvetica-Bold", fontSize=16,
+        textColor=_C_CYAN_TEXT, alignment=1, leading=20,
+    )
+    box_bold_style = ParagraphStyle(
+        "BoxBold", parent=styles["Normal"], fontName="Helvetica-Bold", fontSize=11,
+        textColor=colors.black, alignment=1, leading=14,
     )
     header_style = ParagraphStyle(
         "Header", parent=styles["Normal"], fontName="Helvetica-Bold",
-        fontSize=9, leading=11, textColor=colors.black, alignment=TA_LEFT,
+        fontSize=9, leading=11, textColor=_C_CYAN_TEXT, alignment=1, underline=True,
     )
     body_style = ParagraphStyle(
         "Body", parent=styles["Normal"], fontName="Helvetica",
-        fontSize=9, leading=11, textColor=colors.black, alignment=TA_LEFT, wordWrap="CJK",
+        fontSize=9, leading=11, textColor=colors.black, alignment=1, wordWrap="CJK",
+    )
+    body_left_style = ParagraphStyle(
+        "BodyLeft", parent=body_style, alignment=TA_LEFT,
     )
 
     def para(text: str, style: ParagraphStyle) -> Paragraph:
         safe = escape(str(text or "")).replace("\n", "<br/>")
         return Paragraph(safe or " ", style)
 
-    table_data = [[para(label, header_style) for _, label in columns]]
+    company_key = client.get("company", "Patuma")
+    co = COMPANIES.get(company_key, COMPANIES["Patuma"])
+    date_str = datetime.now(timezone.utc).strftime("%d.%m.%Y")
+    ncols = len(columns)
+
+    story: list = []
+
+    # Company name row (full width)
+    company_html = (
+        f'<font size="24"><b>{escape(co["name"])}</b></font>'
+        f' <font size="14"><b>{escape(co["suffix"])}</b></font>'
+    )
+    story.append(Paragraph(company_html, company_style))
+    tag_html = escape(co["tagline"]) + (
+        f'&nbsp;&nbsp;<font size="8">{escape(co["reg"])}</font>' if co["reg"] else ""
+    )
+    story.append(Paragraph(tag_html, tagline_style))
+
+    # Blue "SHIPPING REPORT" banner
+    banner = LongTable(
+        [[para("SHIPPING REPORT", banner_style)]],
+        colWidths=[available_width],
+    )
+    banner.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), _C_DEEP_BLUE),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    story.append(banner)
+
+    # Date + yellow + Client: + client name
+    # 4 cells: [Date | yellow spacer | Client: | Client name]
+    info_widths = [available_width * 0.12, available_width * 0.52, available_width * 0.10, available_width * 0.26]
+    info = LongTable(
+        [[
+            para(date_str, box_bold_style),
+            "",
+            para("Client:", box_bold_style),
+            para(client.get("name", ""), box_bold_style),
+        ]],
+        colWidths=info_widths,
+    )
+    info.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (0, 0), _C_LIGHT_BOX),
+        ("BACKGROUND", (1, 0), (1, 0), _C_YELLOW),
+        ("BACKGROUND", (2, 0), (2, 0), _C_LIGHT_BOX),
+        ("BACKGROUND", (3, 0), (3, 0), _C_LIGHT_BOX_2),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]))
+    story.append(info)
+
+    # Main data table — dark blue header row with cyan underlined bold text
+    left_align_keys = {"order_booking_file", "comments", "vessel_block"}
+    header_row = [para(label, header_style) for _, label in columns]
+    table_data = [header_row]
     for row in rows:
-        table_data.append([para(row.get(key, ""), body_style) for key, _ in columns])
+        table_data.append([
+            para(row.get(key, ""), body_left_style if key in left_align_keys else body_style)
+            for key, _ in columns
+        ])
+
+    table = LongTable(table_data, colWidths=col_widths, repeatRows=1, splitByRow=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), _C_DEEP_HEADER),
+        ("TEXTCOLOR", (0, 0), (-1, 0), _C_CYAN_TEXT),
+        ("TEXTCOLOR", (0, 1), (-1, -1), colors.black),
+        ("GRID", (0, 0), (-1, -1), 0.6, colors.black),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+        ("TOPPADDING", (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+    ]))
+    story.append(table)
 
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer, pagesize=landscape(A3),
         leftMargin=margin, rightMargin=margin, topMargin=margin, bottomMargin=margin,
-        title=f"Status Report - {client_name}",
+        title=f"Shipping Report - {client.get('name', '')}",
     )
-    date_str = datetime.now(timezone.utc).strftime("%d.%m.%Y")
-
-    story = [
-        Paragraph(f"Status Report — {escape(client_name)}", title_style),
-        Paragraph(f"Report date: {date_str}", subtitle_style),
-    ]
-    table = LongTable(table_data, colWidths=col_widths, repeatRows=1, splitByRow=1)
-    table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#D9D9D9")),
-        ("TEXTCOLOR", (0, 0), (-1, -1), colors.black),
-        ("GRID", (0, 0), (-1, -1), 0.6, colors.black),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 5),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
-        ("TOPPADDING", (0, 0), (-1, -1), 5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-    ]))
-    story.append(table)
     doc.build(story)
     return buffer.getvalue()
 
@@ -628,8 +876,8 @@ def _build_pdf(client_name: str, columns: list[tuple[str, str]], rows: list[dict
 @api_router.get("/reports/{client_id}/xlsx")
 async def export_xlsx(client_id: str):
     client, columns, rows = await _report_rows(client_id)
-    content = _build_xlsx(client["name"], columns, rows)
-    filename = f"status-report-{client['name'].replace(' ', '_')}-{datetime.now(timezone.utc).strftime('%Y%m%d')}.xlsx"
+    content = _build_xlsx(client, columns, rows)
+    filename = f"shipping-report-{client['name'].replace(' ', '_')}-{datetime.now(timezone.utc).strftime('%Y%m%d')}.xlsx"
     return StreamingResponse(
         io.BytesIO(content),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -640,8 +888,8 @@ async def export_xlsx(client_id: str):
 @api_router.get("/reports/{client_id}/pdf")
 async def export_pdf(client_id: str):
     client, columns, rows = await _report_rows(client_id)
-    content = _build_pdf(client["name"], columns, rows)
-    filename = f"status-report-{client['name'].replace(' ', '_')}-{datetime.now(timezone.utc).strftime('%Y%m%d')}.pdf"
+    content = _build_pdf(client, columns, rows)
+    filename = f"shipping-report-{client['name'].replace(' ', '_')}-{datetime.now(timezone.utc).strftime('%Y%m%d')}.pdf"
     return StreamingResponse(
         io.BytesIO(content),
         media_type="application/pdf",

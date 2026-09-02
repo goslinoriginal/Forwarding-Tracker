@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, OPTIONAL_COLUMNS } from "@/lib/api";
+import { api, OPTIONAL_COLUMNS, COMPANIES } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogDescription,
 } from "@/components/ui/dialog";
@@ -41,6 +44,7 @@ const DEFAULT_TOGGLES = {
   pol: false,
   final_destination: true,
   hbill_released: false,
+  copy_docs_status: false,
   expected_freight_rate: false,
 };
 
@@ -48,7 +52,7 @@ export default function ClientsPage() {
   const [clients, setClients] = useState([]);
   const [openAdd, setOpenAdd] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ name: "", contact_email: "", notes: "", optional_columns: DEFAULT_TOGGLES });
+  const [form, setForm] = useState({ name: "", company: "Patuma", contact_email: "", notes: "", optional_columns: DEFAULT_TOGGLES });
 
   const load = async () => {
     const { data } = await api.get("/clients");
@@ -56,7 +60,7 @@ export default function ClientsPage() {
   };
   useEffect(() => { load(); }, []);
 
-  const resetForm = () => setForm({ name: "", contact_email: "", notes: "", optional_columns: DEFAULT_TOGGLES });
+  const resetForm = () => setForm({ name: "", company: "Patuma", contact_email: "", notes: "", optional_columns: DEFAULT_TOGGLES });
 
   const submit = async () => {
     if (!form.name.trim()) { toast.error("Client name is required"); return; }
@@ -81,6 +85,7 @@ export default function ClientsPage() {
     setEditing(c);
     setForm({
       name: c.name || "",
+      company: c.company || "Patuma",
       contact_email: c.contact_email || "",
       notes: c.notes || "",
       optional_columns: { ...DEFAULT_TOGGLES, ...(c.optional_columns || {}) },
@@ -123,6 +128,15 @@ export default function ClientsPage() {
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
+              <div>
+                <Label className="text-slate-300 text-xs uppercase tracking-wider font-mono">Company (branding on report)</Label>
+                <Select value={form.company} onValueChange={(v) => setForm({ ...form, company: v })}>
+                  <SelectTrigger className="mt-1.5 bg-slate-900 border-slate-800" data-testid="client-company-select"><SelectValue /></SelectTrigger>
+                  <SelectContent className="bg-slate-900 border-slate-800">
+                    {COMPANIES.map((c) => <SelectItem key={c.key} value={c.key}>{c.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
               <div>
                 <Label className="text-slate-300 text-xs uppercase tracking-wider font-mono">Client name</Label>
                 <Input
@@ -188,7 +202,12 @@ export default function ClientsPage() {
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="font-mono text-[10px] tracking-widest uppercase text-slate-500 mb-1">/client</div>
+                    <div className="font-mono text-[10px] tracking-widest uppercase text-slate-500 mb-1 flex items-center gap-2">
+                      <span>/client</span>
+                      <span className={`px-1.5 py-0.5 rounded border ${c.company === "Clearfreight" ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/30" : "bg-cyan-500/10 text-cyan-300 border-cyan-500/30"}`}>
+                        {c.company || "Patuma"}
+                      </span>
+                    </div>
                     <h3 className="text-lg font-semibold text-slate-100 truncate">{c.name}</h3>
                     {c.contact_email && <div className="text-xs text-slate-500 mt-0.5 truncate">{c.contact_email}</div>}
                   </div>

@@ -1,0 +1,30 @@
+{
+  "summary": "Iteration 3 testing on Ocean Freight Tracker — company (Patuma/Clearfreight) branding, copy_docs_status column, renamed report labels, and branded PDF/XLSX. Backend: 16/16 pytest tests pass in /app/backend/tests/test_iter3.py covering GET /api/companies metadata, client company field roundtrip + fallback + PATCH, shipment copy_docs_status create+patch+GET persistence, preview column labels (Order, Booking File, Shipped/Pending, SOB DATE/RCG, Vessel, DBN Port ETA, Final Destination, Comments, Copy Docs Status, EXPECTED FREIGHT RATE per container), copy_docs_status column shown only when optional_columns flag true, PDF magic+size for Patuma & Clearfreight, PDF with 6 vs 12 columns, XLSX magic + row-1 company name (PATUMA FREIGHT / CLEARFREIGHT) + row-3 SHIPPING REPORT blue banner (fill 0000CC). Frontend: /clients dialog exposes client-company-select with Patuma+Clearfreight options; selecting Clearfreight saves a client whose card shows an emerald 'Clearfreight' badge, Patuma → cyan badge. /clients/{id} header shows the correct-color company badge next to '/client · status report'. Renamed table headers verified (Order, Booking File, Shipped/Pending, Vessel, DBN Port ETA, Comments, Copy Docs Status). toggle-copy_docs_status testid found in report columns popover. Inline copy-docs-{id} Input persists via PATCH on blur (Tab keypress) — verified value round-trips through GET /api/shipments.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iter3.py",
+    "/app/test_reports/pytest/iter3.xml"
+  ],
+  "action_items": [
+    "Optional: update /app/backend/tests/test_iter2.py::test_xlsx_header_styling — that stale test still expects the old D9D9D9 grey header fill, but iter3 intentionally replaced the XLSX styling with the branded dark-blue+cyan header. The assertion should now expect fill 0033CC and cyan font. Not blocking (iter3 has its own header-styling test); flagging so main agent knows the legacy assertion is superseded."
+  ],
+  "critical_code_review_comments": [
+    "server.py grew to 841 lines — past the 700-line threshold. Should be split into modules (routers/clients.py, routers/shipments.py, routers/reports.py, services/report_builder.py) before further features.",
+    "_build_pdf and _build_xlsx duplicate the same header/branding/company-lookup logic in two shapes. Consider extracting a common 'ReportHeader' dataclass with date_str, company dict, client name so future changes to the banner/date/client-strip only touch one place.",
+    "ClientDetail.jsx is ~575 lines and now embeds the ShipmentForm plus 4 inline table editors (comments Textarea, copy_docs_status Input, quick-comment popover, ANF button). Break out ShipmentRow into its own component and move ShipmentForm into src/components/ShipmentForm.jsx.",
+    "The `Patuma vs Clearfreight` badge colouring is duplicated in ClientsPage.jsx (card) and ClientDetail.jsx (header). Extract a <CompanyBadge company={c.company} /> component to keep colour rules in one place.",
+    "In ClientDetail.jsx the inline comments Textarea and copy_docs_status Input both do local optimistic state via `setShipments((prev) => prev.map(...))` and PATCH on blur. This works but silently drops the server-returned updated_at / auto-delayed comment mutations. If the user types in copy_docs_status while an auto-delay comment would fire, they'd need a full page reload to see it. Minor; call `load()` inside the onBlur or trust server response value instead of local state.",
+    "COMPANIES dict uses two shapes (backend dict-of-dicts vs frontend array-of-objects). Consider fetching /api/companies once in the frontend instead of hardcoding the labels in api.js — that way adding a 3rd sister-company only requires a backend change."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter3.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "N/A — no auth",
+  "seed_data_creation": "Transient TEST_Iter3_* / TEST_UI_* clients + shipments created via API during tests and cleaned up in fixture teardown / at end of Playwright run. Persistent 'Flange 2000' (Patuma) and 'CF Traders' (Clearfreight) clients from prior iterations were preserved.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "iter3.py is idempotent, uses REACT_APP_BACKEND_URL from /app/frontend/.env, and cleans up test data. iter2 test_xlsx_header_styling now fails intentionally due to XLSX header redesign — either delete that legacy assertion or update it to expect fgColor 0033CC + Font(color='33CCFF', underline='single'). For UI blur-save flows (comments-textarea, copy-docs), Playwright's Locator.blur() is a no-op; use keyboard.press('Tab') or click elsewhere to actually fire React's onBlur handler.",
+  "rca of the issue": "One transient Playwright script failure encountered: `page.locator(...).blur()` does not exist in Playwright's Python API and did not trigger the onBlur handler, so the initial copy-docs persistence assertion read the pre-blur value ('') instead of the typed value. Reproduction: fill Input, call locator.blur(), fetch back — value is empty. Mitigation: use `await page.keyboard.press('Tab')` after fill. Re-ran and got expected 'Copies sent 10.01'. Not a product bug."
+}
