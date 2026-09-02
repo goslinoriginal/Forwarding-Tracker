@@ -1,0 +1,160 @@
+{
+  "project_title": "Ocean Freight Shipment Tracker Dashboard - Internal Freight Forwarder Tool",
+  "app_type": "dashboard",
+  "archetype": "Maritime Precision & High-Density Logistics Operations (Swiss Utility x Technical Command Center)",
+  "theme": {
+    "default_mode": "dark",
+    "theme_switch_enabled": true,
+    "primary_concept": "Deep Ocean Obsidian slate backdrop, Signal Teal/Cyan status indicators, Cargo Amber alerts, Crisp Zinc/White high-contrast grid lines, and Industrial Monospace data typography.",
+    "forbidden_colors": [
+      "#7351B7",
+      "#1B93A4",
+      "pure transparent backgrounds on sticky headers or overlays",
+      "generic full-screen purple/pink gradients"
+    ]
+  },
+  "typography": {
+    "font_family_heading": "JetBrains Mono, SF Mono, Space Mono, monospace",
+    "font_family_body": "Inter, -apple-system, BlinkMacSystemFont, sans-serif",
+    "font_family_data": "JetBrains Mono, Menlo, Courier New, monospace",
+    "hierarchy": {
+      "h1": "text-2xl md:text-3xl font-bold tracking-tight text-slate-100",
+      "h2": "text-lg md:text-xl font-semibold tracking-tight text-slate-200",
+      "h3": "text-base font-medium text-slate-300",
+      "table_header": "text-xs font-mono uppercase tracking-wider text-slate-400 bg-slate-900/90",
+      "table_cell": "text-sm text-slate-200 font-sans leading-snug",
+      "doc_number_code": "font-mono text-xs font-semibold px-1.5 py-0.5 rounded bg-slate-800 text-cyan-300 border border-cyan-500/30",
+      "status_badge": "text-xs font-mono font-medium px-2 py-0.5 rounded-full inline-flex items-center gap-1.5"
+    }
+  },
+  "colors": {
+    "background": {
+      "app": "bg-slate-950",
+      "surface": "bg-slate-900",
+      "surface_elevated": "bg-slate-800/80",
+      "table_row_even": "bg-slate-900/60",
+      "table_row_odd": "bg-slate-950/80",
+      "table_row_hover": "hover:bg-slate-800/90 transition-colors duration-150"
+    },
+    "border": {
+      "default": "border-slate-800",
+      "subtle": "border-slate-800/60",
+      "accent": "border-cyan-500/40",
+      "grid": "border-slate-800/80"
+    },
+    "brand_accents": {
+      "teal_cyan": "#0ea5e9",
+      "maritime_blue": "#0284c7",
+      "cargo_amber": "#f59e0b",
+      "signal_green": "#10b981",
+      "hazard_red": "#ef4444",
+      "anf_purple_badge": "#8b5cf6"
+    },
+    "status_pills": {
+      "planned_etd": "bg-amber-500/10 text-amber-400 border border-amber-500/30",
+      "vessel_delayed": "bg-rose-500/10 text-rose-400 border border-rose-500/30",
+      "shipped_on_board": "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30",
+      "anf_received": "bg-purple-500/15 text-purple-300 border border-purple-500/40",
+      "customs_hold": "bg-orange-500/10 text-orange-400 border border-orange-500/30"
+    }
+  },
+  "spacing_and_layout": {
+    "mode": "High Density Grid & Spreadsheet Mode B",
+    "density_rules": "Compact 32px-36px table row height, tight gap-3/gap-4 in dashboard widgets, 100% horizontal stretch for tables with sticky column headers and sticky first columns for Shipper/Consignee and Vessel.",
+    "padding": {
+      "container": "px-4 py-4 md:px-6 md:py-6",
+      "table_cell": "px-3 py-2 text-left align-top",
+      "modal_content": "p-6",
+      "card": "p-4"
+    },
+    "grid_structure": {
+      "kpi_bar": "grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-6",
+      "main_workspace": "grid grid-cols-1 lg:grid-cols-12 gap-6",
+      "client_config_panel": "col-span-full lg:col-span-3",
+      "shipments_table_section": "col-span-full"
+    }
+  },
+  "carrier_branding": {
+    "MSC": { "code": "MSC", "color": "#facc15", "badge_bg": "bg-yellow-500/20 text-yellow-300 border-yellow-500/40" },
+    "Maersk": { "code": "MAEU", "color": "#38bdf8", "badge_bg": "bg-sky-500/20 text-sky-300 border-sky-500/40" },
+    "ONE": { "code": "ONE", "color": "#ec4899", "badge_bg": "bg-pink-500/20 text-pink-300 border-pink-500/40" },
+    "COSCO": { "code": "COSU", "color": "#60a5fa", "badge_bg": "bg-blue-500/20 text-blue-300 border-blue-500/40" },
+    "Hapag Lloyd": { "code": "HLCU", "color": "#f97316", "badge_bg": "bg-orange-500/20 text-orange-300 border-orange-500/40" },
+    "PIL": { "code": "PCIU", "color": "#ef4444", "badge_bg": "bg-red-500/20 text-red-300 border-red-500/40" },
+    "CMA CGM": { "code": "CMDU", "color": "#2563eb", "badge_bg": "bg-blue-600/20 text-blue-200 border-blue-500/40" },
+    "Vanguard": { "code": "VGLU", "color": "#a855f7", "badge_bg": "bg-purple-500/20 text-purple-300 border-purple-500/40" },
+    "Other": { "code": "OTHER", "color": "#94a3b8", "badge_bg": "bg-slate-700/40 text-slate-300 border-slate-600/40" }
+  },
+  "key_features_and_components": {
+    "global_dashboard": {
+      "summary": "High-level overview displaying total active FCL & LCL shipments, total clients, pending ANFs, delayed vessels, upcoming ETDs (next 7 days), and carrier distribution breakdown chart.",
+      "components": ["KPI Metric Cards", "Carrier Volume Distribution Bar", "Urgent Vessel Delay Banner", "Quick Add Shipment Modal Trigger"]
+    },
+    "client_management": {
+      "summary": "Manage tracking profiles per client, customize optional table columns per client, and view status history.",
+      "optional_columns_toggle": [
+        "H/bill released by supplier",
+        "Expected ocean freight rate",
+        "Cargo Type (FCL/LCL)",
+        "Incoterrm",
+        "Free Time Expiry"
+      ]
+    },
+    "spreadsheet_shipment_table": {
+      "summary": "Data-dense interactive table where comments can be edited inline or via quick status preset chips.",
+      "fixed_columns": [
+        "Status Action / Quick Link",
+        "Shipper / Consignee",
+        "Vessel Name & Tracking Doc Number (stacked)",
+        "Carrier",
+        "Container / BL",
+        "POL (Port of Loading)",
+        "POD (Port of Discharge)",
+        "Planned ETD",
+        "Planned ETA",
+        "Inline Comments & Presets",
+        "ANF Status (Mark ANF Received)"
+      ],
+      "stacked_vessel_column": "Displays Vessel Name in bold top line (e.g., 'MSC MAYA 412E') and tracking doc number below in mono badge font (e.g., 'MEDU12345678') with quick copy button.",
+      "track_trace_link": "Deep-link button on every row pointing to track-trace.com/container or bill of lading tracking.",
+      "anf_received_workflow": "Marking 'ANF received. Docs to Ops.' sets ANF flag, highlights row in purple, and excludes shipment from the generated daily client report."
+    },
+    "daily_status_report_generator": {
+      "summary": "Generates a clean daily client status report PDF & Excel export containing only active shipments where ANF has NOT been archived.",
+      "export_options": ["Download PDF Report", "Export Excel Sheet (.xlsx)", "Copy HTML Summary for Email"]
+    }
+  },
+  "image_urls": {
+    "hero_banner": "https://images.unsplash.com/photo-1670121180530-cfcba4438038?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NjV8MHwxfHNlYXJjaHwxfHxvY2VhbiUyMGZyZWlnaHQlMjBjb250YWluZXIlMjB2ZXNzZWwlMjBjYXJnbyUyMHBvcnR8ZW58MHx8fHwxNzg4MzQzMjU5fDA&ixlib=rb-4.1.0&q=85",
+    "port_container_ship": "https://images.unsplash.com/photo-1601311852860-1d8f42381551?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NjV8MHwxfHNlYXJjaHwzfHxvY2VhbiUyMGZyZWlnaHQlMjBjb250YWluZXIlMjB2ZXNzZWwlMjBjYXJnbyUyMHBvcnR8ZW58MHx8fHwxNzg4MzQzMjU5fDA&ixlib=rb-4.1.0&q=85",
+    "terminal_cranes": "https://images.unsplash.com/photo-1700777685830-f501e67260e6?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NjV8MHwxfHNlYXJjaHw0fHxvY2VhbiUyMGZyZWlnaHQlMjBjb250YWluZXIlMjB2ZXNzZWwlMjBjYXJnbyUyMHBvcnR8ZW58MHx8fHwxNzg4MzQzMjU5fDA&ixlib=rb-4.1.0&q=85",
+    "container_yard": "https://images.unsplash.com/photo-1494412519320-aa613dfb7738?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2OTV8MHwxfHNlYXJjaHwyfHxjYXJnbyUyMGNvbnRhaW5lciUyMHNoaXAlMjBsb2dpc3RpY3MlMjB0ZXJtaW5hbHxlbnwwfHx8fDE3ODgzNDMyNjN8MA&ixlib=rb-4.1.0&q=85"
+  },
+  "data_testid_convention": {
+    "rule": "Every interactive button, input, toggle, table row, select, and modal trigger MUST have a kebab-case data-testid attribute.",
+    "examples": [
+      "data-testid=\"client-select-dropdown\"",
+      "data-testid=\"add-client-button\"",
+      "data-testid=\"add-shipment-button\"",
+      "data-testid=\"shipment-table-row-1\"",
+      "data-testid=\"column-toggle-hbill\"",
+      "data-testid=\"column-toggle-freight-rate\"",
+      "data-testid=\"track-trace-link-MSC123456\"",
+      "data-testid=\"quick-comment-planned-etd\"",
+      "data-testid=\"quick-comment-anf-received\"",
+      "data-testid=\"export-pdf-button\"",
+      "data-testid=\"export-excel-button\"",
+      "data-testid=\"anf-status-checkbox\""
+    ]
+  },
+  "instructions_to_main_agent": [
+    "Build a single-tenant ocean freight cargo tracker dashboard with Client Management, Shipment Tracking Table, Daily Status Report Generator, and Analytics.",
+    "Ensure the Vessel column displays the Vessel Name on top and the Tracking Document Number stacked directly below in a styled code block.",
+    "Provide quick preset comment buttons above/inside the comment field ('Planned ETD 05.09.', 'Vessel delayed slightly. Now planned ETD 09.09.', 'Shipped on board', 'ANF received. Docs to Ops.').",
+    "Implement column customization toggles per client (e.g. toggle on/off 'H/bill released by supplier', 'Expected ocean freight rate'). Save client toggles in localStorage or backend.",
+    "When a shipment is marked with 'ANF received. Docs to Ops.', archive/exclude it from the next generated client daily report while keeping it visible in the main history filter.",
+    "Ensure 'Track on track-trace.com' quick links open external tracking in a new tab with the doc number parameter (e.g. https://www.track-trace.com/container?number=MEDU1234567).",
+    "Use Lucide React icons for port/vessel/container/file-export/settings icons.",
+    "Ensure exact data-testid attributes are present on all interactive components."
+  ]
+}

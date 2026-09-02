@@ -1,0 +1,37 @@
+{
+  "summary": "Smoke tested Ocean Freight Tracker backend + frontend. All 10 backend flows pass (client CRUD with optional_columns merge, shipment CRUD with updated_at bump, ANF filtering from preview, XLSX/PDF exports with correct headers & magic bytes, dashboard stats, DELETE cascade). Frontend: Dashboard loads with all stat-* testids and carrier-breakdown; /clients add-client dialog with column toggles saves; ClientDetail add-shipment (fields lack data-testid but placeholders/label-position selectors work); track-trace href correct; Excel & PDF export requests return 200 with proper content-types; mark-anf hides row and show-archived-toggle reveals it. No blockers.",
+  "tested_scope": ["backend", "frontend", "integration"],
+  "passed": [
+    "POST /api/clients with optional_columns toggles persisted",
+    "PATCH /api/clients merge behavior (unspecified keys preserved, e.g., hbill/expected_freight_rate stay true when only pol updated)",
+    "POST /api/shipments with client_id/vessel/tracking/carrier=MSC, GET filters by client_id",
+    "PATCH /api/shipments updates comments/status and updated_at changes (before=45.259367 after=46.430833)",
+    "PATCH {anf_received:true} sets anf_received_at ISO timestamp and excludes shipment from /reports/{id}/preview (rows=[])",
+    "GET /reports/{id}/preview returns columns list + rows[].vessel_block",
+    "GET /reports/{id}/xlsx: HTTP 200, content-type application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, Content-Disposition attachment, starts with PK magic, 5648 bytes",
+    "GET /reports/{id}/pdf: HTTP 200, content-type application/pdf, Content-Disposition attachment, starts with %PDF-1.4",
+    "GET /dashboard/stats returns total_clients, active_shipments, delayed, booked, shipped, carriers[]",
+    "DELETE /api/clients/{id} cascades (shipments for that client_id return [])",
+    "Frontend Dashboard: stat-clients, stat-active, stat-delayed, stat-booked, carrier-breakdown all render; nav-clients works",
+    "Frontend Clients page: add-client-button opens dialog, column-toggle-hbill_released & expected_freight_rate interactable, save creates client-card-{id}",
+    "Frontend ClientDetail: add-shipment saves, shipment-row-{id} appears with stacked vessel/tracking/carrier badge",
+    "Frontend track-trace-link-{id} href = https://www.track-trace.com/container?number=MEDUPW1234",
+    "Frontend export-excel-button -> 200 application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "Frontend export-pdf-button -> 200 application/pdf",
+    "Frontend mark-anf-{id} hides row; show-archived-toggle re-reveals with ANF badge"
+  ],
+  "failed": [
+    {
+      "area": "Frontend testability",
+      "issue": "New-shipment dialog inputs lack data-testid attributes (supplier-input, order-booking-input, file-number-input, vessel-name-input, tracking-doc-input, carrier-select). Tests had to fall back to placeholder/positional selectors. Supplier field has no placeholder either.",
+      "evidence": "page.locator('[data-testid=\"supplier-input\"]').count() == 0; had to use inputs.nth(0) for supplier field",
+      "priority": "LOW"
+    }
+  ],
+  "action_items": [
+    "Optional: add data-testid attributes to new-shipment form inputs (supplier-input, file-number-input, order-booking-input, vessel-name-input, tracking-doc-input, carrier-select) to make E2E tests more robust. Also add a placeholder to the Supplier input."
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "retest_needed": false,
+  "full_testing_deferred": true
+}
