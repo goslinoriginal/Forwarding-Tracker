@@ -770,20 +770,22 @@ def _build_xlsx(client: dict, columns: list[tuple[str, str]], rows: list[dict]) 
     date_str = datetime.now(timezone.utc).strftime("%d.%m.%Y")
 
     thin = Side(style="thin", color="000000")
+    medium = Side(style="medium", color="000000")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    header_border = Border(left=thin, right=thin, top=medium, bottom=medium)
 
     # Row 1: Logo image (bigger + horizontally centered across merged range)
     logo_path = co.get("logo")
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncols)
     ws.row_dimensions[1].height = 80
 
-    # Pre-compute compact column widths so we know total width (15% wider than iter 6)
+    # Column widths — matched to the reference report (Flange 2000 export)
     min_widths = {
-        "supplier": 16, "order_booking_file": 26, "file_number": 12,
-        "status": 14, "sob_date": 12, "vessel_block": 22,
-        "pol": 12, "eta": 12, "final_destination": 16,
-        "comments": 38, "copy_docs_status": 16,
-        "hbill_released": 10, "expected_freight_rate": 14,
+        "supplier": 16.5, "order_booking_file": 17.8, "file_number": 9.5,
+        "status": 14.2, "sob_date": 11.7, "vessel_block": 24.2,
+        "pol": 12.5, "eta": 12.5, "final_destination": 12.7,
+        "comments": 39.5, "copy_docs_status": 15.2,
+        "hbill_released": 10, "expected_freight_rate": 18,
     }
     widths = [min_widths.get(key, 14) for key, _ in columns]
 
@@ -837,54 +839,61 @@ def _build_xlsx(client: dict, columns: list[tuple[str, str]], rows: list[dict]) 
     # Row 2: SHIPPING REPORT blue banner
     ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=ncols)
     cell = ws.cell(row=2, column=1, value="SHIPPING REPORT")
-    cell.fill = PatternFill("solid", fgColor="0000CC")
-    cell.font = Font(bold=True, size=16, color="33CCFF")
+    cell.fill = PatternFill("solid", fgColor="0000D4")
+    cell.font = Font(bold=True, size=16, color="00ABEA", name="Arial")
     cell.alignment = Alignment(horizontal="center", vertical="center")
     ws.row_dimensions[2].height = 26
 
-    # Row 3: Date + yellow spacer + Client: + name
+    # Row 3: Date + teal spacer + Client: + name
     client_label_col = max(2, ncols - 3)
-    yellow_start = 2
-    yellow_end = client_label_col - 1
+    spacer_start = 2
+    spacer_end = client_label_col - 1
     name_start = client_label_col + 1
+    info_font = Font(bold=True, size=12, color="0000D4", name="Arial")
 
     ws.cell(row=3, column=1, value=date_str)
-    ws.cell(row=3, column=1).fill = PatternFill("solid", fgColor="99CCFF")
-    ws.cell(row=3, column=1).font = Font(bold=True, size=11, color="000000")
+    ws.cell(row=3, column=1).fill = PatternFill("solid", fgColor="00ABEA")
+    ws.cell(row=3, column=1).font = info_font
     ws.cell(row=3, column=1).alignment = Alignment(horizontal="center", vertical="center")
 
-    if yellow_end >= yellow_start:
-        ws.merge_cells(start_row=3, start_column=yellow_start, end_row=3, end_column=yellow_end)
-        yc = ws.cell(row=3, column=yellow_start)
-        yc.fill = PatternFill("solid", fgColor="FFFF00")
+    if spacer_end >= spacer_start:
+        ws.merge_cells(start_row=3, start_column=spacer_start, end_row=3, end_column=spacer_end)
+        sc = ws.cell(row=3, column=spacer_start)
+        sc.fill = PatternFill("solid", fgColor="00ABEA")
 
     ws.cell(row=3, column=client_label_col, value="Client:")
-    ws.cell(row=3, column=client_label_col).fill = PatternFill("solid", fgColor="99CCFF")
-    ws.cell(row=3, column=client_label_col).font = Font(bold=True, size=11, color="000000")
+    ws.cell(row=3, column=client_label_col).fill = PatternFill("solid", fgColor="00ABEA")
+    ws.cell(row=3, column=client_label_col).font = info_font
     ws.cell(row=3, column=client_label_col).alignment = Alignment(horizontal="center", vertical="center")
 
     if name_start <= ncols:
         ws.merge_cells(start_row=3, start_column=name_start, end_row=3, end_column=ncols)
         nc = ws.cell(row=3, column=name_start, value=client.get("name", ""))
-        nc.fill = PatternFill("solid", fgColor="66CCFF")
-        nc.font = Font(bold=True, size=11, color="000000")
+        nc.fill = PatternFill("solid", fgColor="00ABEA")
+        nc.font = info_font
         nc.alignment = Alignment(horizontal="center", vertical="center")
-    ws.row_dimensions[3].height = 22
+    ws.row_dimensions[3].height = 24
 
-    # Row 4: Table header — dark blue bg, cyan bold underlined text
-    header_fill = PatternFill("solid", fgColor="0033CC")
-    header_font = Font(bold=True, color="33CCFF", size=10, underline="single")
+    # Row 4: Table header — dark blue bg, cyan bold text (Copy Docs Status / Expected
+    # Freight Rate get their own accent colors, matching the reference report)
+    header_fill = PatternFill("solid", fgColor="0000D4")
+    header_font = Font(bold=True, color="00ABEA", size=12, name="Arial")
     header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    for col_index, (_, label) in enumerate(columns, start=1):
+    accent_header_style = {
+        "copy_docs_status": (PatternFill("solid", fgColor="3B608D"), Font(bold=True, color="00ABEA", size=11, name="Arial")),
+        "expected_freight_rate": (PatternFill("solid", fgColor="00B0F0"), Font(bold=False, color="000000", size=11, name="Arial")),
+    }
+    for col_index, (key, label) in enumerate(columns, start=1):
         c = ws.cell(row=4, column=col_index, value=label)
-        c.fill = header_fill
-        c.font = header_font
+        fill, font = accent_header_style.get(key, (header_fill, header_font))
+        c.fill = fill
+        c.font = font
         c.alignment = header_align
-        c.border = border
-    ws.row_dimensions[4].height = 34
+        c.border = header_border
+    ws.row_dimensions[4].height = 42
 
     # Data rows
-    body_font = Font(color="000000", size=10)
+    body_font = Font(color="000000", size=12, name="Arial")
     body_align = Alignment(vertical="center", wrap_text=True, horizontal="center")
     for row_index, row in enumerate(rows, start=5):
         max_lines = 1
@@ -899,7 +908,7 @@ def _build_xlsx(client: dict, columns: list[tuple[str, str]], rows: list[dict]) 
                 colw = widths[col_index - 1]
                 wrapped = sum(max(1, -(-len(line) // max(colw - 2, 1))) for line in lines)
                 max_lines = max(max_lines, wrapped)
-        ws.row_dimensions[row_index].height = max(48, min(180, 16 * max_lines + 8))
+        ws.row_dimensions[row_index].height = max(48, min(200, 20 * max_lines + 10))
 
     for i, w in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
