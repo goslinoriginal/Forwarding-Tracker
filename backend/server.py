@@ -126,6 +126,7 @@ class Shipment(BaseModel):
     planned_eta: Optional[str] = None  # ISO date YYYY-MM-DD
     second_vessel_name: Optional[str] = None
     second_vessel_etd: Optional[str] = None  # ISO date YYYY-MM-DD
+    second_vessel_sob_date: Optional[str] = None  # ISO date YYYY-MM-DD (set when 2nd vessel has sailed)
     final_destination: Optional[str] = None
     comments: str = ""
     hbill_released: Optional[bool] = None
@@ -155,6 +156,7 @@ class ShipmentCreate(BaseModel):
     planned_eta: Optional[str] = None
     second_vessel_name: Optional[str] = None
     second_vessel_etd: Optional[str] = None
+    second_vessel_sob_date: Optional[str] = None
     final_destination: Optional[str] = None
     comments: str = ""
     hbill_released: Optional[bool] = None
@@ -179,6 +181,7 @@ class ShipmentUpdate(BaseModel):
     planned_eta: Optional[str] = None
     second_vessel_name: Optional[str] = None
     second_vessel_etd: Optional[str] = None
+    second_vessel_sob_date: Optional[str] = None
     final_destination: Optional[str] = None
     comments: Optional[str] = None
     hbill_released: Optional[bool] = None
@@ -283,102 +286,120 @@ async def list_shipments(client_id: Optional[str] = None, include_anf: bool = Tr
 async def create_shipment(payload: ShipmentCreate):
     await _get_client(payload.client_id)
     data = payload.model_dump()
-    # Seed the initial comment "DD.MM - Planned ETD DD.MM." when planned_etd is set and no comment provided
-    if (not data.get("comments")) and data.get("planned_etd"):
-        today = date.today()
-        data["comments"] = f"{today.day:02d}.{today.month:02d} - Planned ETD {_fmt_dot_date(data['planned_etd'])}"
     ship = Shipment(**data)
-    await db.shipments.insert_one(ship.model_dump())
-    return ship
+    ship_dict = ship.model_dump()
+    ship_dict["comments"] = _regenerate_comment(ship_dict)
+    ship_dict["status"] = _derive_status(ship_dict)
+    ship_dict["updated_at"] = _now_iso()
+    await db.shipments.insert_one(ship_dict)
+    return Shipment(**ship_dict)
 
 
-class MarkShippedPayload(BaseModel):
-    sob_date: str  # DD.MM.YYYY or YYYY-MM-DD
+class VesselStatusPayload(BaseModel):
+    vessel: int  # 1 or 2
+    sailed: bool
+    date: Optional[str] = None  # YYYY-MM-DD when sailed=True
 
 
-class MarkDelayedPayload(BaseModel):
-    new_etd: str  # YYYY-MM-DD
-
-
-def _append_comment(existing: str, snippet: str) -> str:
-    current = (existing or "").strip()
-    if snippet and snippet in current:
-        return current
-    if not current:
-        return snippet
-    sep = "" if current.endswith(".") else "."
-    return f"{current}{sep} {snippet}"
-
-
-_DATE_PREFIX_RE = re.compile(r"^\d{1,2}\.\d{1,2}\.?\s*-\s*")
-
-
-def _refresh_date_prefix(text: str) -> str:
-    """Ensure comment starts with today's 'DD.MM - ' prefix, replacing any existing date prefix."""
+def _regenerate_comment(ship: dict) -> str:
+    """Build the shipment comment from state.
+    Format:
+      - Single vessel:  '{today} - Planned ETD X. Awaiting confirmation of departure.'
+      - Two vessels:    '{today} - Planned ETD X (1st Vessel). Planned ETD Y (2nd Vessel). Awaiting confirmation of departure.'
+      - When a vessel sails, 'Planned ETD X' becomes 'SOB X'.
+      - Awaiting clause depends on how far the shipment has progressed and cargo_type.
+    """
     today = date.today()
     prefix = f"{today.day:02d}.{today.month:02d} - "
-    stripped = _DATE_PREFIX_RE.sub("", (text or "").strip())
-    if not stripped:
-        return prefix.rstrip()
-    return prefix + stripped
+
+    def _plain_dd_mm(iso: Optional[str]) -> str:
+        if not iso:
+            return ""
+        try:
+            d = date.fromisoformat(iso)
+            return f"{d.day:02d}.{d.month:02d}"
+        except Exception:
+            return iso
+
+    has_second = bool((ship.get("second_vessel_name") or "").strip()) or bool(ship.get("second_vessel_etd")) or bool(ship.get("second_vessel_sob_date"))
+    first_sailed = bool(ship.get("sob_date"))
+    second_sailed = bool(ship.get("second_vessel_sob_date"))
+
+    parts: list[str] = []
+
+    # First vessel clause
+    first_label = " (1st Vessel)" if has_second else ""
+    if first_sailed:
+        parts.append(f"SOB {_plain_dd_mm(ship.get('sob_date'))}{first_label}.")
+    elif ship.get("planned_etd"):
+        parts.append(f"Planned ETD {_plain_dd_mm(ship['planned_etd'])}{first_label}.")
+
+    # Second vessel clause
+    if has_second:
+        if second_sailed:
+            parts.append(f"SOB {_plain_dd_mm(ship.get('second_vessel_sob_date'))} (2nd Vessel).")
+        elif ship.get("second_vessel_etd"):
+            parts.append(f"Planned ETD {_plain_dd_mm(ship['second_vessel_etd'])} (2nd Vessel).")
+
+    # Awaiting clause
+    all_sailed = first_sailed and (not has_second or second_sailed)
+    is_lcl = (ship.get("cargo_type") or "FCL").upper() == "LCL"
+    if all_sailed:
+        parts.append("Awaiting SOB's." if is_lcl else "Awaiting ANF.")
+    elif first_sailed and has_second:
+        parts.append("Awaiting confirmation of departure of 2nd vessel.")
+    else:
+        parts.append("Awaiting confirmation of departure.")
+
+    body = " ".join(p for p in parts if p)
+    return prefix + body if body else prefix.rstrip()
 
 
+def _derive_status(ship: dict) -> str:
+    """Only three states: Planned, Booked, Shipped. Never Delayed."""
+    has_second = bool((ship.get("second_vessel_name") or "").strip()) or bool(ship.get("second_vessel_etd")) or bool(ship.get("second_vessel_sob_date"))
+    first_sailed = bool(ship.get("sob_date"))
+    second_sailed = bool(ship.get("second_vessel_sob_date"))
+    if first_sailed and (not has_second or second_sailed):
+        return "Shipped"
+    if ship.get("vessel_name") or ship.get("planned_etd") or ship.get("tracking_doc_number"):
+        return "Booked"
+    return "Planned"
 
 
-
-@api_router.post("/shipments/{shipment_id}/mark-shipped", response_model=Shipment)
-async def mark_shipped(shipment_id: str, payload: MarkShippedPayload):
+@api_router.post("/shipments/{shipment_id}/vessel-status", response_model=Shipment)
+async def set_vessel_status(shipment_id: str, payload: VesselStatusPayload):
     existing = await db.shipments.find_one({"id": shipment_id}, _proj())
     if not existing:
         raise HTTPException(status_code=404, detail="Shipment not found")
-    sob_iso = _to_iso_or_original(payload.sob_date)
-    sob_dd_mm = _fmt_dot_date(sob_iso) or payload.sob_date
-    snippet = f"SOB {sob_dd_mm} Awaiting ANF."
-    new_comment = _refresh_date_prefix(_append_comment(existing.get("comments", ""), snippet))
-    updates = {
-        "sob_date": sob_iso,
-        "status": "Shipped",
-        "comments": new_comment,
-        "updated_at": _now_iso(),
-    }
-    await db.shipments.update_one({"id": shipment_id}, {"$set": updates})
+    if payload.vessel not in (1, 2):
+        raise HTTPException(status_code=400, detail="vessel must be 1 or 2")
+    updates: dict = {}
+    field = "sob_date" if payload.vessel == 1 else "second_vessel_sob_date"
+    if payload.sailed:
+        iso = _to_iso_or_original(payload.date or "")
+        if not iso:
+            raise HTTPException(status_code=400, detail="date required when sailed=true")
+        updates[field] = iso
+    else:
+        updates[field] = None
+    merged = {**existing, **updates}
+    merged["comments"] = _regenerate_comment(merged)
+    merged["status"] = _derive_status(merged)
+    merged["updated_at"] = _now_iso()
+    await db.shipments.update_one({"id": shipment_id}, {"$set": {**updates, "comments": merged["comments"], "status": merged["status"], "updated_at": merged["updated_at"]}})
     doc = await db.shipments.find_one({"id": shipment_id}, _proj())
     return doc
-
-
-@api_router.post("/shipments/{shipment_id}/mark-delayed", response_model=Shipment)
-async def mark_delayed(shipment_id: str, payload: MarkDelayedPayload):
-    existing = await db.shipments.find_one({"id": shipment_id}, _proj())
-    if not existing:
-        raise HTTPException(status_code=404, detail="Shipment not found")
-    new_etd_iso = _to_iso_or_original(payload.new_etd)
-    dd_mm = _fmt_dot_date(new_etd_iso) or payload.new_etd
-    snippet = f"Vessel delayed slightly. Now planned ETD {dd_mm}"
-    new_comment = _refresh_date_prefix(_append_comment(existing.get("comments", ""), snippet))
-    updates = {
-        "planned_etd": new_etd_iso,
-        "status": "Delayed" if existing.get("status") != "Shipped" else existing.get("status"),
-        "comments": new_comment,
-        "updated_at": _now_iso(),
-    }
-    await db.shipments.update_one({"id": shipment_id}, {"$set": updates})
-    doc = await db.shipments.find_one({"id": shipment_id}, _proj())
-    return doc
-
-
-class AppendCommentPayload(BaseModel):
-    snippet: str
-
-
 @api_router.post("/shipments/{shipment_id}/append-comment", response_model=Shipment)
-async def append_comment(shipment_id: str, payload: AppendCommentPayload):
+async def append_comment_deprecated(shipment_id: str):
+    """Deprecated: comments are now auto-generated from state. Regenerate and return."""
     existing = await db.shipments.find_one({"id": shipment_id}, _proj())
     if not existing:
         raise HTTPException(status_code=404, detail="Shipment not found")
-    new_comment = _refresh_date_prefix(_append_comment(existing.get("comments", ""), payload.snippet.strip()))
-    await db.shipments.update_one({"id": shipment_id}, {"$set": {"comments": new_comment, "updated_at": _now_iso()}})
-    doc = await db.shipments.find_one({"id": shipment_id}, _proj())
-    return doc
+    comment = _regenerate_comment(existing)
+    status = _derive_status(existing)
+    await db.shipments.update_one({"id": shipment_id}, {"$set": {"comments": comment, "status": status, "updated_at": _now_iso()}})
+    return await db.shipments.find_one({"id": shipment_id}, _proj())
 
 
 def _fmt_dot_date(iso: str) -> str:
@@ -477,7 +498,10 @@ async def update_shipment(shipment_id: str, payload: ShipmentUpdate):
         updates["anf_received_at"] = _now_iso()
     if "anf_received" in updates and not updates["anf_received"]:
         updates["anf_received_at"] = None
-    updates, _ = _auto_delayed_comment(existing, updates)
+    # Auto-regenerate comment + status from state
+    merged = {**existing, **updates}
+    updates["comments"] = _regenerate_comment(merged)
+    updates["status"] = _derive_status(merged)
     updates["updated_at"] = _now_iso()
     await db.shipments.update_one({"id": shipment_id}, {"$set": updates})
     doc = await db.shipments.find_one({"id": shipment_id}, _proj())
@@ -713,15 +737,15 @@ def _build_xlsx(client: dict, columns: list[tuple[str, str]], rows: list[dict]) 
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncols)
     ws.row_dimensions[1].height = 80
 
-    # Pre-compute compact column widths so we know total width
+    # Pre-compute compact column widths so we know total width (15% wider than iter 6)
     min_widths = {
-        "supplier": 14, "order_booking_file": 22, "file_number": 10,
-        "status": 12, "sob_date": 10, "vessel_block": 18,
-        "pol": 10, "eta": 10, "final_destination": 14,
-        "comments": 32, "copy_docs_status": 14,
-        "hbill_released": 8, "expected_freight_rate": 12,
+        "supplier": 16, "order_booking_file": 26, "file_number": 12,
+        "status": 14, "sob_date": 12, "vessel_block": 22,
+        "pol": 12, "eta": 12, "final_destination": 16,
+        "comments": 38, "copy_docs_status": 16,
+        "hbill_released": 10, "expected_freight_rate": 14,
     }
-    widths = [min_widths.get(key, 12) for key, _ in columns]
+    widths = [min_widths.get(key, 14) for key, _ in columns]
 
     if logo_path and os.path.exists(logo_path):
         try:
@@ -731,13 +755,20 @@ def _build_xlsx(client: dict, columns: list[tuple[str, str]], rows: list[dict]) 
             img = XLImage(logo_path)
             orig_w, orig_h = img.width, img.height
             aspect = orig_w / orig_h if orig_h else 10
-            # Cap logo to 60% of table width AND 100px max height, keep aspect ratio
+            # Row 1 height set FIRST — logo fills top-to-bottom of that row
+            row1_h_pt = 80
+            row1_h_px = int(row1_h_pt * 96 / 72)  # ~107 px
+            target_h_px = row1_h_px  # fill entire row height
+            target_w_px = int(target_h_px * aspect)
+            # Compute total range width in pixels
             total_px = sum(int(w * 7 + 5) for w in widths)
-            max_w = int(total_px * 0.6)
-            target_w_px = min(max_w, int(100 * aspect))
-            target_h_px = max(50, int(target_w_px / aspect))
+            # Cap width at 90% of table so it doesn't spill
+            if target_w_px > total_px * 0.9:
+                target_w_px = int(total_px * 0.9)
+                target_h_px = int(target_w_px / aspect)
+                row1_h_pt = max(60, int(target_h_px * 72 / 96) + 4)
+            ws.row_dimensions[1].height = row1_h_pt
             offset_px = max(0, (total_px - target_w_px) // 2)
-            # Walk columns to find anchor col + column offset
             anchor_col = 0
             running = 0
             col_off = 0
@@ -748,9 +779,8 @@ def _build_xlsx(client: dict, columns: list[tuple[str, str]], rows: list[dict]) 
                     col_off = offset_px - running
                     break
                 running += col_px
-            ws.row_dimensions[1].height = max(60, int(target_h_px * 0.78))
             img.anchor = OneCellAnchor(
-                _from=AnchorMarker(col=anchor_col, colOff=pixels_to_EMU(col_off), row=0, rowOff=pixels_to_EMU(2)),
+                _from=AnchorMarker(col=anchor_col, colOff=pixels_to_EMU(col_off), row=0, rowOff=0),
                 ext=XDRPositiveSize2D(cx=pixels_to_EMU(target_w_px), cy=pixels_to_EMU(target_h_px)),
             )
             ws.add_image(img)

@@ -1,0 +1,42 @@
+{
+  "summary": "Iter 8 backend fully implemented & green (16/16 pytest). New /vessel-status endpoint works for vessel=1/2, sailed true+date and unsailed clearing; 400 on missing date and vessel=3. _regenerate_comment produces correct strings for single-vessel (no '(1st Vessel)' suffix), two-vessel Planned ETD, SOB after sail, awaiting clause switching between 'Awaiting confirmation of departure.', '…of 2nd vessel.', 'Awaiting ANF.' (FCL) and \"Awaiting SOB's.\" (LCL). _derive_status returns only Planned/Booked/Shipped; PATCH with status=Delayed is overridden. Deprecated /mark-shipped and /mark-delayed correctly return 404, /append-comment now just regenerates. second_vessel_sob_date round-trips via PATCH. XLSX total pixel width now ~1490px (asserted 1450-1560, was ~1290 in iter 6). Logo image cy in EMU equals row1 height in px within 5px (fills row vertically) and remains horizontally centered via OneCellAnchor. FRONTEND HAS NOT BEEN UPDATED — every iter 8 frontend requirement is regressed (see frontend_issues).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "ClientDetail ship-status-select (New shipment dialog)", "issue": "Dropdown still shows 4 options ['Planned','Booked','Shipped','Delayed']. Iter 8 requires exactly 3 — remove 'Delayed'.", "selector": "[data-testid=ship-status-select]", "priority": "HIGH"},
+      {"component": "ClientDetail Comments cell", "issue": "Still rendered as editable <Textarea data-testid=comments-textarea-{id}>. Iter 8 requires a READ-ONLY <div data-testid=comments-view-{id}> (comments are server-generated and must not be user-editable). Remove onBlur PATCH of comments too.", "selector": "[data-testid^=comments-textarea-]", "priority": "HIGH"},
+      {"component": "ClientDetail per-row action buttons", "issue": "Old 'Delayed' + 'Shipped' date-picker buttons still present (mark-delayed-{id}, mark-shipped-{id}) and they call deprecated endpoints /mark-delayed and /mark-shipped which now return 404. They must be REMOVED and replaced with two new buttons per row: 'mark-first-sailed-{id}' (or 'unmark-first-sailed-{id}' when sob_date is set) and 'mark-second-sailed-{id}' / 'unmark-second-sailed-{id}' (only rendered when second_vessel_name is set). Both must POST /api/shipments/{id}/vessel-status with body {vessel:1|2, sailed:bool, date?:'YYYY-MM-DD'}.", "selector": "[data-testid^=mark-delayed-], [data-testid^=mark-shipped-]", "priority": "HIGH"}
+    ],
+    "integration_issues": [
+      {"flow": "Mark shipped / mark delayed", "issue": "Handlers markShipped and markDelayed in ClientDetail.jsx still POST to /shipments/{id}/mark-shipped and /shipments/{id}/mark-delayed — backend now returns 404. Replace with setVesselSailed(shipId, vesselNum, isoDate) / setVesselUnsailed(shipId, vesselNum) hitting /vessel-status.", "affected_selectors": ["[data-testid^=mark-shipped-]", "[data-testid^=mark-delayed-]"]},
+      {"flow": "Quick-comment preset", "issue": "insertQuickComment still POSTs {snippet} to /append-comment; the backend now ignores the snippet and regenerates. This still returns 200, but the UI affordance is misleading — either remove the 'Preset' popover entirely (comments are now auto) or repurpose it.", "affected_selectors": ["[data-testid^=quick-comment-]", "[data-testid^=preset-]"]}
+    ],
+    "design_issues": [
+      {"screen": "ClientDetail comments column", "issues": ["When comments become read-only, ensure the div preserves line breaks / wraps naturally and has consistent height with sibling cells; today the textarea provided that shape."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iter8.py", "/app/test_reports/pytest/iter8.xml"],
+  "action_items": [
+    "In /app/frontend/src/pages/ClientDetail.jsx: change status options array (line ~171) to ['Planned','Booked','Shipped'] only.",
+    "Convert Comments <Textarea> at line ~548 to a read-only <div data-testid={`comments-view-${s.id}`} className='whitespace-pre-wrap text-[11px] text-slate-300'>{s.comments}</div>. Drop the local onChange and onBlur PATCH.",
+    "Remove the 'Delayed' DatePickerButton and rename 'Shipped' — replace both with two new DatePickerButtons: mark-first-sailed-{id}/unmark-first-sailed-{id} (unmark variant when s.sob_date truthy) calling setVesselSailed(s.id,1,iso)/setVesselUnsailed(s.id,1); and, only if s.second_vessel_name, a mark-second-sailed-{id}/unmark-second-sailed-{id} pair calling vessel=2.",
+    "Add setVesselSailed / setVesselUnsailed helpers: POST `${API}/shipments/${id}/vessel-status` with {vessel, sailed:true, date:iso} or {vessel, sailed:false}, then reload.",
+    "Delete markShipped and markDelayed handlers (dead code hitting 404 endpoints).",
+    "Consider removing the QUICK_COMMENTS Preset popover since comments are now server-generated (or leave but note it just triggers regen).",
+    "Also remove 'Delayed' badge style from STATUS_STYLES_LOCAL to avoid dead code (backend never emits Delayed anymore)."
+  ],
+  "critical_code_review_comments": [
+    "server.py still contains dead helper _auto_delayed_comment (~50 lines) and unused STATUS_OPTIONS constant that includes 'Delayed'. Remove to keep single source of truth.",
+    "server.py is 1057 lines — split XLSX/PDF builders into modules (app has grown across 8 iterations).",
+    "In _regenerate_comment, when neither planned_etd nor sob_date exist for the 1st vessel and no second vessel is set, the comment becomes '{today} - Awaiting confirmation of departure.' which is fine but empty-ish. Consider guarding.",
+    "In set_vessel_status the update dict is built twice ($set uses updates + a few merged keys). Cleaner to just $set merged fields.",
+    "Frontend markDelayed/markShipped silently 404 to user with a 'Failed' toast — because deprecated endpoints were replaced, this manifests as a broken UX for any user who clicks the still-visible Shipped/Delayed buttons."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter8.py"],
+  "success_rate": {"backend": "100% (16/16)", "frontend": "0% — no iter 8 changes shipped"},
+  "seed_data_creation": "Test shipments (supplier=TEST_iter8) on Flange 2000 are cleaned up in module-scoped teardown.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend iter 8 spec fully passes: /api/shipments POST auto-generates comment+status, /vessel-status endpoint works, PATCH cannot yield 'Delayed', XLSX widths bumped to ~1490px and logo fills row 1 height. Frontend ClientDetail.jsx is entirely untouched from iter 6/7 — main agent must apply the FE refactor listed in action_items. After FE refactor, re-run Playwright: expect data-testid comments-view-{id} div (not textarea), no mark-delayed/mark-shipped buttons, presence of mark-first-sailed-{id} always and mark-second-sailed-{id} only when second_vessel_name set, and only 3 status options in ship-status-select. Existing clients: Flange 2000 (Patuma) 61aa6ac3-3adb-44a7-832b-94799a99faf7 and CF Traders (Clearfreight) b2d8c8cc-f981-4ea8-954c-cef5422cf3ce.",
+  "rca of the issue": "Main agent updated /app/backend/server.py (new endpoint, comment regen, status derive, XLSX width bump, logo fills row) but did not update /app/frontend/src/pages/ClientDetail.jsx. The FE still uses the iter 6 shape: editable comments textarea (line 548), status Select with Delayed option (line 171), DatePickerButtons wired to deprecated /mark-shipped and /mark-delayed handlers (markShipped, markDelayed at lines 359-373), no setVesselSailed/setVesselUnsailed calls to the new /vessel-status endpoint, no per-vessel sail toggle buttons. Mitigation: apply the action_items list to ClientDetail.jsx."
+}

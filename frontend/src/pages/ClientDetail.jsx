@@ -168,7 +168,7 @@ function ShipmentForm({ value, onChange, showOptional }) {
         <Select value={value.status} onValueChange={(v) => set({ status: v })}>
           <SelectTrigger className="mt-1 bg-slate-900 border-slate-800" data-testid="ship-status-select"><SelectValue /></SelectTrigger>
           <SelectContent className="bg-slate-900 border-slate-800">
-            {["Planned", "Booked", "Shipped", "Delayed"].map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+            {["Planned", "Booked", "Shipped"].map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
           </SelectContent>
         </Select>
       </div>
@@ -356,20 +356,20 @@ export default function ClientDetail() {
     toast.success("Marked ANF received — will drop off next report");
   };
 
-  const markDelayed = async (s, isoDate) => {
+  const setVesselSailed = async (s, vesselNum, isoDate) => {
     try {
-      await api.post(`/shipments/${s.id}/mark-delayed`, { new_etd: isoDate });
-      toast.success("Marked delayed — comment auto-added");
+      await api.post(`/shipments/${s.id}/vessel-status`, { vessel: vesselNum, sailed: true, date: isoDate });
+      toast.success(`${vesselNum === 1 ? "1st" : "2nd"} vessel marked as sailed`);
       load();
-    } catch { toast.error("Failed to mark delayed"); }
+    } catch { toast.error("Failed to mark sailed"); }
   };
 
-  const markShipped = async (s, isoDate) => {
+  const setVesselUnsailed = async (s, vesselNum) => {
     try {
-      await api.post(`/shipments/${s.id}/mark-shipped`, { sob_date: isoDate });
-      toast.success("Marked shipped — SOB comment added");
+      await api.post(`/shipments/${s.id}/vessel-status`, { vessel: vesselNum, sailed: false });
+      toast.success(`${vesselNum === 1 ? "1st" : "2nd"} vessel unmarked`);
       load();
-    } catch { toast.error("Failed to mark shipped"); }
+    } catch { toast.error("Failed to unmark"); }
   };
 
   const insertQuickComment = async (s, snippet) => {
@@ -545,34 +545,9 @@ export default function ClientDetail() {
                     <td className="px-1.5 py-2 font-mono text-[11px] text-slate-300 break-words">{s.eta}</td>
                     {showOptional.final_destination && <td className="px-1.5 py-2 text-slate-300 text-xs break-words">{s.final_destination}</td>}
                     <td className="px-1.5 py-2">
-                      <Textarea
-                        value={s.comments || ""}
-                        onChange={(e) => setShipments((prev) => prev.map((x) => x.id === s.id ? { ...x, comments: e.target.value } : x))}
-                        onBlur={(e) => patchShip(s.id, { comments: e.target.value })}
-                        rows={3}
-                        className="bg-slate-900/60 border-slate-800 text-[11px] min-h-[60px] resize-y w-full"
-                        data-testid={`comments-textarea-${s.id}`}
-                      />
-                      <Popover>
-                        <PopoverTrigger asChild>
-                          <button className="mt-1 inline-flex items-center gap-1 text-[9px] font-mono uppercase tracking-wider text-cyan-400 hover:text-cyan-300" data-testid={`quick-comment-${s.id}`}>
-                            <MessageSquarePlus className="h-3 w-3" /> Preset
-                          </button>
-                        </PopoverTrigger>
-                        <PopoverContent align="start" className="w-72 bg-slate-950 border-slate-800 p-2">
-                          <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 px-2 py-1">Quick comments</div>
-                          {QUICK_COMMENTS.map((q) => (
-                            <button
-                              key={q}
-                              onClick={() => insertQuickComment(s, q)}
-                              className="block w-full text-left px-2 py-1.5 rounded text-xs text-slate-300 hover:bg-slate-900"
-                              data-testid={`preset-${s.id}-${q.slice(0, 10).replace(/\s+/g, "-")}`}
-                            >
-                              {q}
-                            </button>
-                          ))}
-                        </PopoverContent>
-                      </Popover>
+                      <div className="text-[11px] text-slate-300 whitespace-pre-wrap leading-relaxed" data-testid={`comments-view-${s.id}`}>
+                        {s.comments || <span className="text-slate-600 italic">Auto-generated from vessel status</span>}
+                      </div>
                     </td>
                     {showOptional.copy_docs_status && (
                       <td className="px-1.5 py-2 text-[11px] text-slate-300">
@@ -597,22 +572,46 @@ export default function ClientDetail() {
                     <td className="px-1.5 py-2">
                       <div className="flex flex-col gap-1">
                         <div className="flex items-center gap-1 flex-wrap">
-                          <DatePickerButton
-                            label="Delayed"
-                            icon={AlertTriangle}
-                            tone="rose"
-                            onPick={(iso) => markDelayed(s, iso)}
-                            testid={`mark-delayed-${s.id}`}
-                            disabled={s.anf_received}
-                          />
-                          <DatePickerButton
-                            label="Shipped"
-                            icon={Sailboat}
-                            tone="emerald"
-                            onPick={(iso) => markShipped(s, iso)}
-                            testid={`mark-shipped-${s.id}`}
-                            disabled={s.anf_received}
-                          />
+                          {s.sob_date ? (
+                            <button
+                              onClick={() => setVesselUnsailed(s, 1)}
+                              data-testid={`unmark-first-sailed-${s.id}`}
+                              title="Unmark 1st vessel as sailed"
+                              className="inline-flex items-center gap-1 h-6 px-1.5 rounded border text-[10px] font-mono uppercase tracking-wider bg-emerald-500/20 border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/30"
+                            >
+                              <Sailboat className="h-3 w-3" /> 1st SOB
+                            </button>
+                          ) : (
+                            <DatePickerButton
+                              label="1st Sailed"
+                              icon={Sailboat}
+                              tone="emerald"
+                              onPick={(iso) => setVesselSailed(s, 1, iso)}
+                              testid={`mark-first-sailed-${s.id}`}
+                              disabled={s.anf_received}
+                            />
+                          )}
+                          {s.second_vessel_name ? (
+                            s.second_vessel_sob_date ? (
+                              <button
+                                onClick={() => setVesselUnsailed(s, 2)}
+                                data-testid={`unmark-second-sailed-${s.id}`}
+                                title="Unmark 2nd vessel as sailed"
+                                className="inline-flex items-center gap-1 h-6 px-1.5 rounded border text-[10px] font-mono uppercase tracking-wider bg-emerald-500/20 border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/30"
+                              >
+                                <Sailboat className="h-3 w-3" /> 2nd SOB
+                              </button>
+                            ) : (
+                              <DatePickerButton
+                                label="2nd Sailed"
+                                icon={Sailboat}
+                                tone="emerald"
+                                onPick={(iso) => setVesselSailed(s, 2, iso)}
+                                testid={`mark-second-sailed-${s.id}`}
+                                disabled={s.anf_received}
+                              />
+                            )
+                          ) : null}
                         </div>
                         <div className="flex items-center gap-1">
                           {!s.anf_received ? (
