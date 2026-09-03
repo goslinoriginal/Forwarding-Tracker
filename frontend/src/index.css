@@ -67,7 +67,7 @@ code, .font-mono {
 @layer base {
   * { @apply border-border; }
   body { @apply bg-slate-950 text-slate-200; }
-  html.light body { @apply bg-slate-50 text-slate-900; }
+  html.light body { background-color: rgb(250 249 246); color: rgb(30 27 22); }
 }
 
 /* Custom scrollbar */
@@ -80,36 +80,40 @@ html.light ::-webkit-scrollbar-thumb { background: rgb(203, 213, 225); }
 html.light ::-webkit-scrollbar-thumb:hover { background: rgb(148, 163, 184); }
 
 /* Light-mode color remap for hardcoded slate classes across the app */
-html.light {
-  --deep-bg: 248 250 252;
-  --card-bg: 255 255 255;
-  --line: 226 232 240;
-  --text: 15 23 42;
-  --muted: 71 85 105;
-  --subtle: 100 116 139;
-}
 html.light body .bg-slate-950,
-html.light body .bg-slate-950\/95 { background-color: rgb(248 250 252) !important; }
+html.light body .bg-slate-950\/95 { background-color: rgb(250 249 246) !important; }
 html.light body .bg-slate-900,
 html.light body .bg-slate-900\/40,
 html.light body .bg-slate-900\/60,
-html.light body .bg-slate-900\/90,
 html.light body .bg-slate-900\/30 { background-color: rgb(255 255 255) !important; }
+html.light body .bg-slate-900\/90 { background-color: rgb(245 244 240) !important; }
 html.light body .bg-slate-800,
-html.light body .bg-slate-800\/40 { background-color: rgb(241 245 249) !important; }
-html.light body .border-slate-900,
-html.light body .border-slate-800 { border-color: rgb(226 232 240) !important; }
+html.light body .bg-slate-800\/40 { background-color: rgb(238 236 231) !important; }
+html.light body .border-slate-900 { border-color: rgb(214 211 205) !important; }
+html.light body .border-slate-800 { border-color: rgb(203 200 194) !important; }
 html.light body .text-slate-100,
 html.light body .text-slate-200,
-html.light body .text-slate-300 { color: rgb(15 23 42) !important; }
-html.light body .text-slate-400,
-html.light body .text-slate-500 { color: rgb(71 85 105) !important; }
-html.light body .text-slate-600 { color: rgb(148 163 184) !important; }
+html.light body .text-slate-300 { color: rgb(30 27 22) !important; }
+html.light body .text-slate-400 { color: rgb(87 83 76) !important; }
+html.light body .text-slate-500 { color: rgb(115 111 102) !important; }
+html.light body .text-slate-600 { color: rgb(148 143 130) !important; }
 html.light body .hover\:bg-slate-900:hover,
-html.light body .hover\:bg-slate-800:hover { background-color: rgb(241 245 249) !important; }
+html.light body .hover\:bg-slate-800:hover { background-color: rgb(240 238 232) !important; }
 html.light body .hover\:text-slate-100:hover,
-html.light body .hover\:text-slate-200:hover { color: rgb(15 23 42) !important; }
+html.light body .hover\:text-slate-200:hover { color: rgb(30 27 22) !important; }
 html.light body ::selection { background: rgb(6, 182, 212); color: white; }
+
+/* Stronger borders in dark mode for key surfaces */
+html.dark .data-table th,
+html.dark .data-table td { border-color: rgb(51 65 85) !important; }
+
+/* Comment truncation with tooltip */
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 
 /* Grain overlay */
 .grain-overlay::before {

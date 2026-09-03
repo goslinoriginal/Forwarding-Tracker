@@ -1,0 +1,35 @@
+{
+  "summary": "Iteration 10 backend feature is NOT implemented in /app/backend/server.py. Expected: Shipment/ShipmentCreate/ShipmentUpdate carry new fields first_vessel_state and second_vessel_state (default 'planned'), update_shipment detects vessel_name change ('changed') or later planned_etd ('delayed'), and _regenerate_comment emits 'Vessel delayed slightly. Now planned ETD DD.MM.' / 'Vessel changed by S/Line. Now planned ETD DD.MM.' clauses (with '(2nd Vessel)' suffix for the 2nd vessel; SOB overrides). Reality: (a) No first_vessel_state/second_vessel_state fields on any model; (b) update_shipment never calls _auto_delayed_comment and never sets vessel-state fields; (c) _regenerate_comment only ever outputs 'Planned ETD X' or 'SOB X' clauses, never 'Vessel delayed slightly' or 'Vessel changed by S/Line'. Live curl walkthrough confirmed the miss.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "PATCH /api/shipments/{id}", "issue": "PATCH {planned_etd:'2026-09-15'} on shipment whose old planned_etd was 2026-09-10 returns comments='...Planned ETD 15.09. Awaiting confirmation of departure.' — expected 'Vessel delayed slightly. Now planned ETD 15.09.' No first_vessel_state field returned at all.", "priority": "CRITICAL"},
+      {"endpoint": "PATCH /api/shipments/{id}", "issue": "PATCH {vessel_name:'MSC New'} when existing vessel_name='MSC Original' returns comments='...Planned ETD 15.09. Awaiting confirmation of departure.' — expected 'Vessel changed by S/Line. Now planned ETD 15.09.' No first_vessel_state='changed'.", "priority": "CRITICAL"},
+      {"endpoint": "Model: Shipment / ShipmentCreate / ShipmentUpdate", "issue": "Missing fields first_vessel_state and second_vessel_state (default 'planned'). Downstream logic depending on state cannot function.", "priority": "CRITICAL"},
+      {"endpoint": "_regenerate_comment", "issue": "Function does not consider vessel_state; emits only 'Planned ETD' or 'SOB' clauses. Needs branches for 'delayed' and 'changed' states, with SOB overriding both.", "priority": "CRITICAL"},
+      {"endpoint": "update_shipment", "issue": "Does not compare new vs existing planned_etd/vessel_name to set first_vessel_state; does not do same for 2nd vessel; needs elif chain giving 'changed' precedence over 'delayed'. The legacy helper _auto_delayed_comment exists but is never called.", "priority": "CRITICAL"}
+    ],
+    "minor": []
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [],
+  "action_items": [
+    "Add first_vessel_state: str = 'planned' and second_vessel_state: str = 'planned' to Shipment, ShipmentCreate, and ShipmentUpdate (Optional for Update).",
+    "In update_shipment: after loading existing, compute state deltas — elif chain: if new vessel_name provided AND existing has value AND differs -> first_vessel_state='changed'; elif new planned_etd provided AND (existing has value and new > existing) -> first_vessel_state='delayed'. Same for 2nd vessel using second_vessel_name / second_vessel_etd. Do NOT downgrade an existing 'changed'/'delayed' back to 'planned' on unrelated PATCHes.",
+    "Update _regenerate_comment to accept vessel state: for 1st vessel, if sob_date -> SOB clause (overrides); elif state=='changed' -> 'Vessel changed by S/Line. Now planned ETD DD.MM.' (+ ' (1st Vessel)' when 2nd exists); elif state=='delayed' -> 'Vessel delayed slightly. Now planned ETD DD.MM.'; else -> 'Planned ETD DD.MM.'. Same pattern for 2nd vessel with ' (2nd Vessel)' suffix.",
+    "Ensure PATCH that does not touch vessel_name / planned_etd / second_vessel_* leaves state fields untouched so comment retains prior clause (regression case).",
+    "Ensure earlier planned_etd (new < existing) does NOT change state (only later triggers 'delayed').",
+    "Delete unused _auto_delayed_comment helper OR wire it in — right now it's dead code but tempting to invoke incorrectly."
+  ],
+  "critical_code_review_comments": [
+    "Dead code: _auto_delayed_comment (lines ~438-488) is defined but never called from update_shipment. Either remove or integrate.",
+    "server.py is now 1057 lines — consider splitting shipments/reports/dashboard into separate modules (>700-line guideline).",
+    "In current update_shipment, exclude_none=True prevents clients from clearing fields (e.g., PATCH vessel_name='' to unset). Acceptable but worth documenting."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "0% for iteration-10 spec; regression POST-with-planned_etd only comment still passes", "frontend": "N/A"},
+  "seed_data_creation": "Created + deleted TEST_iter10 client during verification. No lingering seed data.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 10 introduces first_vessel_state/second_vessel_state on Shipment model and state-aware comments in _regenerate_comment. Verify with: POST client, POST shipment with vessel_name+planned_etd (initial 'Planned ETD ...'), PATCH later planned_etd ('Vessel delayed slightly. Now planned ETD ...'), PATCH vessel_name ('Vessel changed by S/Line. Now planned ETD ...'), same for 2nd vessel, then POST /api/shipments/{id}/vessel-status vessel=1 sailed=true (SOB overrides). Use existing client Flange 2000 id 61aa6ac3-3adb-44a7-832b-94799a99faf7 for manual sanity.",
+  "rca of the issue": "Main agent's problem statement claims curl walkthrough already showed correct behavior, but the actual server.py in /app/backend has none of the iteration-10 changes: no first_vessel_state field on any model, update_shipment never calls _auto_delayed_comment nor sets any state, and _regenerate_comment only emits 'Planned ETD X' / 'SOB X'. Reproduction: POST shipment {vessel_name:'MSC Original', planned_etd:'2026-09-10'} then PATCH {planned_etd:'2026-09-15'} -> comment is '...Planned ETD 15.09. Awaiting confirmation of departure.' (should include 'Vessel delayed slightly. Now planned ETD 15.09.'). PATCH {vessel_name:'MSC New'} likewise leaves comment as plain Planned ETD (should be 'Vessel changed by S/Line. ...'). Fix per action_items above."
+}

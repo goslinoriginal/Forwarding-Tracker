@@ -1,0 +1,36 @@
+{
+  "summary": "Iteration 11 (three UX bug fixes) verified on the live preview. None of the three changes are present in the codebase — index.css and pages/ClientDetail.jsx still reflect the iter-10 state. Every one of the seven acceptance criteria in the review request fails.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "index.css :: html.light body bg", "issue": "Light mode body backgroundColor is rgb(248,250,252) (cold slate-50). Expected rgb(250,249,246) (warm stone-50). The --deep-bg / bg-slate-950 remap on lines 84 and 92 still uses 248 250 252.", "selector": "body (html.light)", "priority": "HIGH"},
+      {"component": "index.css :: light-mode border remap", "issue": "html.light border override still maps to rgb(226,232,240) (cool slate-200). Expected warmer stone/neutral (rgb(214,211,205) or rgb(203,200,194)). Lines 86 and 101 unchanged.", "selector": ".border-slate-800 (html.light)", "priority": "HIGH"},
+      {"component": "index.css :: .data-table th/td dark border", "issue": "Computed borderColor is rgb(30,65,85)/rgb(30,41,59) — still slate-800. Expected rgb(51,65,85) (slate-700). Line 127 not updated and no 'html.dark .data-table th,td' override exists.", "selector": ".data-table td", "priority": "HIGH"},
+      {"component": "index.css :: .line-clamp-3 utility", "issue": "Utility not defined. getComputedStyle(...).webkitLineClamp === 'none' when applying class 'line-clamp-3'. Tailwind line-clamp plugin not enabled and no custom rule added.", "selector": ".line-clamp-3", "priority": "HIGH"},
+      {"component": "ClientDetail.jsx :: Comments cell", "issue": "Comments cell is still a plain <div data-testid=comments-view-{id}> (tag=DIV) with class 'text-[11px] text-slate-300 whitespace-pre-wrap leading-relaxed'. Rendered height is 178.75px (full multi-line). No line-clamp-3, no title attribute, and no Popover wrapping. Expected: <button class='line-clamp-3 ...' title={s.comments}> inside <Popover><PopoverTrigger asChild>...</PopoverTrigger><PopoverContent className='w-96 ...'>...</PopoverContent></Popover>.", "selector": "[data-testid^='comments-view-']", "priority": "CRITICAL"},
+      {"component": "ClientDetail.jsx :: Comments Popover", "issue": "No Popover exists around the comments cell in the shipments table (only unrelated Popovers on lines 77 and 428 remain). Click-to-view full comment behavior missing.", "selector": "table Popover", "priority": "CRITICAL"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "ClientDetail (shipment table, light mode)", "issues": ["Body bg is still cold blue-white; hard borders remain barely visible in both modes; comments column occupies 178px+ vertically on a single row instead of the intended 3-line clamp."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Update /app/frontend/src/index.css: (a) Change html.light body/bg-slate-950 mapping to rgb(250 249 246) (stone-50); (b) Change html.light border override to warm neutral rgb(214 211 205) or rgb(203 200 194); (c) Add rule 'html.dark .data-table th, html.dark .data-table td { border-color: rgb(51 65 85); }'; (d) Add .line-clamp-3 utility (display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden;) OR enable @tailwindcss/line-clamp plugin.",
+    "Update /app/frontend/src/pages/ClientDetail.jsx line ~547-551: wrap the comments <div> in a shadcn <Popover>; replace the div with <PopoverTrigger asChild><button data-testid={`comments-view-${s.id}`} title={s.comments} className='line-clamp-3 text-[11px] text-slate-300 whitespace-pre-wrap leading-relaxed text-left hover:text-cyan-300'>...</button></PopoverTrigger><PopoverContent className='w-96 bg-slate-950 border-slate-800'><div className='whitespace-pre-wrap text-xs text-slate-300'>{s.comments}</div></PopoverContent>.",
+    "After fixes, re-run the frontend test (this iteration_11 spec) to verify all seven acceptance criteria."
+  ],
+  "critical_code_review_comments": [
+    "The changes described in the iteration-11 problem statement were not implemented at all — likely files never got saved or the previous edit was overwritten by hot-reload of stale content. Main agent should verify file contents post-save.",
+    "index.css line 84 defines --deep-bg but it is never used; consider removing dead vars.",
+    "ClientDetail.jsx is 669 lines — approaching the 700-line threshold; consider extracting the shipments table into its own component before adding the Popover to keep the file maintainable."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped)", "frontend": "0% (0 of 7 acceptance criteria pass)"},
+  "seed_data_creation": "None. Used the existing Flange 2000 client (61aa6ac3-...) as instructed.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "After main agent applies the iteration-11 changes to index.css and ClientDetail.jsx, re-run at /clients/61aa6ac3-3adb-44a7-832b-94799a99faf7. Toggle theme via [data-testid=theme-toggle]. Verify: body bg light = rgb(250,249,246); [data-testid^=comments-view-] tagName === 'BUTTON', className contains 'line-clamp-3', height < 60px, title attribute equals full comment; clicking it opens a Popover with width 384px containing the full text; dark-mode .data-table td borderColor === rgb(51,65,85).",
+  "rca of the issue": "Root cause: iteration-11 code changes appear to have never been committed to /app/frontend/src/index.css or /app/frontend/src/pages/ClientDetail.jsx. Direct grep confirms: no 'line-clamp' or '250, 249, 246' string in index.css; comments cell in ClientDetail.jsx line 548 is still <div className='text-[11px] text-slate-300 whitespace-pre-wrap leading-relaxed'>, not a Popover-wrapped button. Reproduction: open the live preview, toggle to light mode -> body bg is rgb(248,250,252); scroll to Flange 2000 comments cell -> tall multi-line div with no click behavior. Mitigation: main agent must apply the edits listed under action_items."
+}

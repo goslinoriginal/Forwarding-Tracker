@@ -349,10 +349,7 @@ export default function ClientDetail() {
   };
 
   const markAnf = async (s) => {
-    const nextComment = s.comments && !s.comments.includes("ANF received")
-      ? `${s.comments}${s.comments.endsWith(".") ? "" : "."} ANF received. Docs to Ops.`
-      : (s.comments || "ANF received. Docs to Ops.");
-    await patchShip(s.id, { anf_received: true, comments: nextComment });
+    await patchShip(s.id, { anf_received: true });
     toast.success("Marked ANF received — will drop off next report");
   };
 
@@ -545,9 +542,23 @@ export default function ClientDetail() {
                     <td className="px-1.5 py-2 font-mono text-[11px] text-slate-300 break-words">{s.eta}</td>
                     {showOptional.final_destination && <td className="px-1.5 py-2 text-slate-300 text-xs break-words">{s.final_destination}</td>}
                     <td className="px-1.5 py-2">
-                      <div className="text-[11px] text-slate-300 whitespace-pre-wrap leading-relaxed" data-testid={`comments-view-${s.id}`}>
-                        {s.comments || <span className="text-slate-600 italic">Auto-generated from vessel status</span>}
-                      </div>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <button
+                            data-testid={`comments-view-${s.id}`}
+                            title={s.comments || ""}
+                            className="text-left w-full text-[11px] text-slate-300 leading-snug line-clamp-3 hover:text-cyan-300 transition-colors"
+                          >
+                            {s.comments || <span className="text-slate-600 italic">Auto-generated from vessel status</span>}
+                          </button>
+                        </PopoverTrigger>
+                        <PopoverContent align="start" className="w-96 bg-slate-950 border-slate-700 p-3">
+                          <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-2">Full comment</div>
+                          <div className="text-xs text-slate-200 whitespace-pre-wrap leading-relaxed">
+                            {s.comments || "—"}
+                          </div>
+                        </PopoverContent>
+                      </Popover>
                     </td>
                     {showOptional.copy_docs_status && (
                       <td className="px-1.5 py-2 text-[11px] text-slate-300">

@@ -127,6 +127,8 @@ class Shipment(BaseModel):
     second_vessel_name: Optional[str] = None
     second_vessel_etd: Optional[str] = None  # ISO date YYYY-MM-DD
     second_vessel_sob_date: Optional[str] = None  # ISO date YYYY-MM-DD (set when 2nd vessel has sailed)
+    first_vessel_state: str = "planned"  # planned | delayed | changed (sailed handled by sob_date)
+    second_vessel_state: str = "planned"
     final_destination: Optional[str] = None
     comments: str = ""
     hbill_released: Optional[bool] = None
@@ -329,17 +331,31 @@ def _regenerate_comment(ship: dict) -> str:
 
     # First vessel clause
     first_label = " (1st Vessel)" if has_second else ""
+    first_state = (ship.get("first_vessel_state") or "planned").lower()
     if first_sailed:
         parts.append(f"SOB {_plain_dd_mm(ship.get('sob_date'))}{first_label}.")
     elif ship.get("planned_etd"):
-        parts.append(f"Planned ETD {_plain_dd_mm(ship['planned_etd'])}{first_label}.")
+        etd_txt = _plain_dd_mm(ship["planned_etd"])
+        if first_state == "delayed":
+            parts.append(f"Vessel delayed slightly. Now planned ETD {etd_txt}{first_label}.")
+        elif first_state == "changed":
+            parts.append(f"Vessel changed by S/Line. Now planned ETD {etd_txt}{first_label}.")
+        else:
+            parts.append(f"Planned ETD {etd_txt}{first_label}.")
 
     # Second vessel clause
     if has_second:
+        second_state = (ship.get("second_vessel_state") or "planned").lower()
         if second_sailed:
             parts.append(f"SOB {_plain_dd_mm(ship.get('second_vessel_sob_date'))} (2nd Vessel).")
         elif ship.get("second_vessel_etd"):
-            parts.append(f"Planned ETD {_plain_dd_mm(ship['second_vessel_etd'])} (2nd Vessel).")
+            etd_txt = _plain_dd_mm(ship["second_vessel_etd"])
+            if second_state == "delayed":
+                parts.append(f"Vessel delayed slightly. Now planned ETD {etd_txt} (2nd Vessel).")
+            elif second_state == "changed":
+                parts.append(f"Vessel changed by S/Line. Now planned ETD {etd_txt} (2nd Vessel).")
+            else:
+                parts.append(f"Planned ETD {etd_txt} (2nd Vessel).")
 
     # Awaiting clause
     all_sailed = first_sailed and (not has_second or second_sailed)
@@ -498,10 +514,34 @@ async def update_shipment(shipment_id: str, payload: ShipmentUpdate):
         updates["anf_received_at"] = _now_iso()
     if "anf_received" in updates and not updates["anf_received"]:
         updates["anf_received_at"] = None
+
+    # Detect vessel state transitions (only when a previous value existed — not on initial fill)
+    def _later(a, b):
+        try:
+            return date.fromisoformat(a) > date.fromisoformat(b)
+        except Exception:
+            return False
+
+    if "vessel_name" in updates and existing.get("vessel_name") and updates["vessel_name"] and updates["vessel_name"].strip() != (existing.get("vessel_name") or "").strip():
+        updates["first_vessel_state"] = "changed"
+    elif "planned_etd" in updates and existing.get("planned_etd") and _later(updates["planned_etd"], existing["planned_etd"]):
+        updates["first_vessel_state"] = "delayed"
+
+    if "second_vessel_name" in updates and existing.get("second_vessel_name") and updates["second_vessel_name"] and updates["second_vessel_name"].strip() != (existing.get("second_vessel_name") or "").strip():
+        updates["second_vessel_state"] = "changed"
+    elif "second_vessel_etd" in updates and existing.get("second_vessel_etd") and _later(updates["second_vessel_etd"], existing["second_vessel_etd"]):
+        updates["second_vessel_state"] = "delayed"
+
     # Auto-regenerate comment + status from state
     merged = {**existing, **updates}
     updates["comments"] = _regenerate_comment(merged)
     updates["status"] = _derive_status(merged)
+    # On ANF-received transition, ensure the ANF phrase is present (survives comment regeneration)
+    if updates.get("anf_received") and not existing.get("anf_received"):
+        if "ANF received" not in (updates["comments"] or ""):
+            base = (updates["comments"] or "").rstrip()
+            sep = "" if not base else (" " if base.endswith(".") else ". ")
+            updates["comments"] = f"{base}{sep}ANF received. Docs to Ops."
     updates["updated_at"] = _now_iso()
     await db.shipments.update_one({"id": shipment_id}, {"$set": updates})
     doc = await db.shipments.find_one({"id": shipment_id}, _proj())

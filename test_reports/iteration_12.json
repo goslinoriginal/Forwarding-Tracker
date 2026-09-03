@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 12 verified. Backend ANF archival flow works end-to-end (11/11 pytest cases pass). Frontend iter-11 UI fixes are mostly present: comments cell is a BUTTON with line-clamp-3 (height 45px), title attribute, Popover opens at width 384px; light-mode borders warm rgb(203,200,194); dark-mode .data-table td border rgb(51,65,85); ANF archival hides row from default view, ANF-toggle brings it back with 'ANF' badge and disabled sailed pickers. TWO issues remain: (1) light-mode body background is still cold slate-50 rgb(248,250,252), not warm stone rgb(250,249,246). Root cause: /app/frontend/src/index.css line 70 applies `bg-slate-50` to `html.light body` directly — this is not remapped by the descendant selectors on lines 82-84. (2) Clicking 'mark ANF' does NOT persist the appended 'ANF received. Docs to Ops.' text: backend PATCH /api/shipments/{id} on line 537 of server.py unconditionally calls `_regenerate_comment(merged)` which rebuilds the comment from vessel state, overwriting whatever comments string the client sent in the same PATCH.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "PATCH /api/shipments/{id}", "issue": "When body contains both `anf_received: true` AND `comments: <appended text>`, backend line 537 (`updates['comments'] = _regenerate_comment(merged)`) overwrites the client-supplied comments and the 'ANF received. Docs to Ops.' text is lost. Acceptance criterion #4 fails end-to-end because of this even though the frontend sends the right payload.", "priority": "HIGH"}
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "index.css :: html.light body", "issue": "Body background in light mode computes to rgb(248,250,252) (slate-50). Expected rgb(250,249,246) (warm stone-50). Line 70 uses `@apply bg-slate-50` — should be a warm stone tint or explicit `background-color: rgb(250 249 246)` override.", "selector": "html.light body", "priority": "HIGH"}
+    ],
+    "integration_issues": [
+      {"flow": "Mark ANF -> auto-comment", "issue": "Frontend appends 'ANF received. Docs to Ops.' to comments and PATCHes it along with anf_received:true, but backend clobbers the comment via _regenerate_comment. Net effect on UI: after ANF, the row is archived correctly but the comment does not contain the required ANF text.", "affected_selectors": ["[data-testid^='comments-view-']", "[data-testid^='mark-anf-']"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_iter12_anf.py", "/app/test_reports/pytest/iter12.xml"],
+  "action_items": [
+    "Fix /app/frontend/src/index.css line 70: replace `html.light body { @apply bg-slate-50 text-slate-900; }` with something like `html.light body { background-color: rgb(250 249 246); color: rgb(30 27 22); }` (or use bg-stone-50 if configured). Verify body computed bg becomes rgb(250,249,246).",
+    "Fix /app/backend/server.py update_shipment (~line 507-540): when the incoming PATCH payload explicitly provides `comments`, honor that value INSTEAD of regenerating. Simplest fix: only regenerate when 'comments' not in updates. Alternative: after regeneration, if the client's comments contain 'ANF received' and merged comments don't, append it back. Even simpler for the ANF case: when anf_received flips true, append 'ANF received. Docs to Ops.' to the regenerated comment server-side (removes the need for the frontend to compose it).",
+    "After both fixes, re-run frontend iter-12 spec at /clients/61aa6ac3-3adb-44a7-832b-94799a99faf7 and confirm (a) body bg == rgb(250,249,246) and (b) after mark-anf, the row's title attribute in show-archived view contains 'ANF received. Docs to Ops.'."
+  ],
+  "critical_code_review_comments": [
+    "server.py update_shipment: `_regenerate_comment` clobbering client-supplied comments is a design smell — every PATCH silently overwrites comments regardless of what the caller sent. Consider making regeneration opt-in (e.g., only when vessel/date fields change) or preserve client-provided text.",
+    "ClientDetail.jsx is 683 lines — near the 700-line soft limit; extract the shipments table + row into a subcomponent before further growth.",
+    "index.css line 82-104 uses !important overrides to remap slate colors in light mode; consider defining a proper light theme in the @layer base :root/html.light block instead — the current approach is brittle and doesn't cover body's own bg (root cause of the light-bg bug)."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter12_anf.py (new)"],
+  "success_rate": {"backend": "100% (11/11)", "frontend": "6/7 acceptance criteria pass (light body bg fails; ANF comment text fails due to backend)"},
+  "test_credentials": "n/a (no auth)",
+  "seed_data_creation": "backend test creates and cleans up 1 shipment named TEST_ANF_SUPPLIER under client 61aa6ac3-3adb-44a7-832b-94799a99faf7 (Flange 2000).",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iter-11 UI is 90% complete. Only two follow-ups: (1) light body bg needs to be warm stone rgb(250,249,246) — fix at index.css line 70; (2) backend PATCH must preserve client-supplied comments or add 'ANF received. Docs to Ops.' server-side when anf_received flips true. Backend suite /app/backend/tests/test_iter12_anf.py can be reused; run with `REACT_APP_BACKEND_URL=<url> pytest backend/tests/test_iter12_anf.py -v`. Frontend Popover, line-clamp, warm borders, dark data-table borders, ANF archival hide/show and disabled sailed pickers all confirmed working via Playwright.",
+  "rca of the issue": "Two RCAs. (1) Light body bg: html.light body { @apply bg-slate-50 } on line 70 of index.css sets body bg directly via Tailwind's slate-50 color. The subsequent overrides on lines 82-84 (`html.light body .bg-slate-950 { background-color: rgb(250 249 246) }`) only apply to descendants that have the .bg-slate-950 class, not to body itself. Fix: change line 70. (2) ANF comment loss: backend update_shipment always executes `updates['comments'] = _regenerate_comment(merged)` (line 537) after merging incoming payload, so the client's appended 'ANF received. Docs to Ops.' string is discarded before persisting. Reproduction: PATCH /api/shipments/{id} with {anf_received:true, comments:'foo. ANF received. Docs to Ops.'} -> GET returns comments without the ANF text. Fix: either skip regeneration when client sent comments, or append the ANF phrase server-side on the anf_received transition."
+}

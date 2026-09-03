@@ -21,6 +21,10 @@ Freight forwarder needs a shipment tracker for FCL & LCL ocean cargo. Today they
   - `ClientsPage` (`/clients`) — cards with column-toggle chips, add/edit/delete client.
   - `ClientDetail` (`/clients/:id`) — spreadsheet-style shipment table with stacked Vessel/Tracking Doc badge (deep-links to track-trace.com), inline comment textarea, quick-preset comment popover, ANF mark, PDF/Excel export, per-client column-toggle popover.
 
+## Changelog
+- **2026-02**: Iteration 12 shipped — light-mode body bg switched to warm stone rgb(250,249,246); ANF-received transition now appends "ANF received. Docs to Ops." server-side (survives comment regeneration); un-marking ANF clears the phrase & anf_received_at.
+- **2026-02**: Iteration 11 — comments cell wrapped in shadcn Popover with `line-clamp-3` button (height ~45px) + `title` tooltip; dark-mode `.data-table` borders bumped to slate-700 for visibility; light-mode neutral palette warmed to stone/neutral.
+
 ## What's implemented (2026-02)
 - End-to-end client + shipment CRUD ✅
 - Fixed columns: Supplier, Order/Booking, File #, Status, Vessel + Tracking Doc, POD, ETA, Comments ✅
