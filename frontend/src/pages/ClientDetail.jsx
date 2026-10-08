@@ -276,7 +276,7 @@ function OtherVessels({ value, onChange, vessels }) {
   );
 }
 
-function ShipmentForm({ value, onChange, showOptional, vessels }) {
+function ShipmentForm({ value, onChange, showOptional, vessels, isEdit }) {
   const set = (patch) => onChange({ ...value, ...patch });
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -289,7 +289,7 @@ function ShipmentForm({ value, onChange, showOptional, vessels }) {
         <Input value={value.file_number} onChange={(e) => set({ file_number: e.target.value })} className="mt-1 bg-slate-900 border-slate-800" data-testid="ship-filenum-input" placeholder="e.g. 158064" />
       </div>
       <div className="md:col-span-2">
-        <Label className="text-xs uppercase tracking-wider font-mono text-slate-400">Order / Booking file</Label>
+        <Label className="text-xs uppercase tracking-wider font-mono text-slate-400">Order</Label>
         <Textarea rows={2} value={value.order_booking_file} onChange={(e) => set({ order_booking_file: e.target.value })} className="mt-1 bg-slate-900 border-slate-800" data-testid="ship-order-input" placeholder="e.g. ZN26148-1, 2x20' FCLs, 50 Plts, 50865.99 Kgs" />
       </div>
       <div>
@@ -361,10 +361,12 @@ function ShipmentForm({ value, onChange, showOptional, vessels }) {
           <Input value={value.pol || ""} onChange={(e) => set({ pol: e.target.value })} className="mt-1 bg-slate-900 border-slate-800" data-testid="ship-pol-input" placeholder="e.g. Shanghai" />
         </div>
       )}
-      <div>
-        <Label className="text-xs uppercase tracking-wider font-mono text-slate-400">POD (Port of discharge)</Label>
-        <Input value={value.pod} onChange={(e) => set({ pod: e.target.value })} className="mt-1 bg-slate-900 border-slate-800" data-testid="ship-pod-input" placeholder="e.g. Durban" />
-      </div>
+      {!isEdit && (
+        <div>
+          <Label className="text-xs uppercase tracking-wider font-mono text-slate-400">POD (Port of discharge)</Label>
+          <Input value={value.pod} onChange={(e) => set({ pod: e.target.value })} className="mt-1 bg-slate-900 border-slate-800" data-testid="ship-pod-input" placeholder="e.g. Durban" />
+        </div>
+      )}
       <div>
         <Label className="text-xs uppercase tracking-wider font-mono text-slate-400">ETA</Label>
         <Input type="date" value={value.eta || ""} onChange={(e) => set({ eta: e.target.value })} className="mt-1 bg-slate-900 border-slate-800" data-testid="ship-eta-input" />
@@ -829,7 +831,7 @@ export default function ClientDetail() {
           <DialogHeader>
             <DialogTitle className="text-slate-100">Edit shipment</DialogTitle>
           </DialogHeader>
-          <ShipmentForm value={form} onChange={setForm} showOptional={showOptional} vessels={vessels} />
+          <ShipmentForm value={form} onChange={setForm} showOptional={showOptional} vessels={vessels} isEdit />
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpenEdit(false)} className="border-slate-700">Cancel</Button>
             <Button onClick={submitEdit} className="bg-cyan-500 hover:bg-cyan-400 text-slate-950" data-testid="save-edit-shipment">Save</Button>

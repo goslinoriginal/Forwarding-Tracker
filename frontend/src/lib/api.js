@@ -71,9 +71,26 @@ const CARRIER_NUMBER_PREFIX = {
   COSCO: "COSU",
 };
 
+// The number itself is the source of truth for its prefix — a SCAC code like
+// MAEU/ONEY/COSU identifies the carrier regardless of what's selected in the
+// Carrier dropdown, so stripping/routing never silently no-ops just because
+// that field was left on a different value.
+const PREFIX_TO_CARRIER = Object.fromEntries(
+  Object.entries(CARRIER_NUMBER_PREFIX).map(([carrier, prefix]) => [prefix, carrier])
+);
+
+function detectCarrierFromNumber(docNumber) {
+  const upper = (docNumber || "").trim().toUpperCase();
+  for (const [prefix, carrier] of Object.entries(PREFIX_TO_CARRIER)) {
+    if (upper.startsWith(prefix)) return carrier;
+  }
+  return null;
+}
+
 export function clipboardTrackingNumber(carrier, docNumber) {
   const n = (docNumber || "").trim();
-  const prefix = CARRIER_NUMBER_PREFIX[carrier];
+  const effectiveCarrier = detectCarrierFromNumber(n) || carrier;
+  const prefix = CARRIER_NUMBER_PREFIX[effectiveCarrier];
   if (prefix && n.toUpperCase().startsWith(prefix)) {
     return n.slice(prefix.length);
   }
@@ -86,6 +103,7 @@ export function trackTraceUrl(docNumber) {
 }
 
 export function carrierTrackUrl(carrier, docNumber) {
-  const fn = CARRIER_TRACK_URL[carrier] || CARRIER_TRACK_URL.Other;
+  const effectiveCarrier = detectCarrierFromNumber(docNumber) || carrier;
+  const fn = CARRIER_TRACK_URL[effectiveCarrier] || CARRIER_TRACK_URL.Other;
   return fn(docNumber ? docNumber.trim() : "");
 }
