@@ -52,7 +52,7 @@ export default function ClientsPage() {
   const [clients, setClients] = useState([]);
   const [openAdd, setOpenAdd] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ name: "", company: "Patuma", contact_email: "", notes: "", default_pod: "", optional_columns: DEFAULT_TOGGLES });
+  const [form, setForm] = useState({ name: "", company: "Clearfreight", contact_email: "", notes: "", default_pod: "", optional_columns: DEFAULT_TOGGLES });
 
   const load = async () => {
     const { data } = await api.get("/clients");
@@ -60,7 +60,7 @@ export default function ClientsPage() {
   };
   useEffect(() => { load(); }, []);
 
-  const resetForm = () => setForm({ name: "", company: "Patuma", contact_email: "", notes: "", default_pod: "", optional_columns: DEFAULT_TOGGLES });
+  const resetForm = () => setForm({ name: "", company: "Clearfreight", contact_email: "", notes: "", default_pod: "", optional_columns: DEFAULT_TOGGLES });
 
   const submit = async () => {
     if (!form.name.trim()) { toast.error("Client name is required"); return; }
@@ -121,7 +121,7 @@ export default function ClientsPage() {
               <Plus className="mr-1.5 h-4 w-4" /> New client
             </Button>
           </DialogTrigger>
-          <DialogContent className="bg-slate-950 border-slate-800 max-w-lg">
+          <DialogContent className="bg-slate-950 border-slate-800 max-w-lg max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="text-slate-100">{editing ? "Edit client" : "New client"}</DialogTitle>
               <DialogDescription className="text-slate-400">
