@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import { CARRIER_STYLES } from "@/lib/api";
-import { Ship, Users, AlertTriangle, PackageCheck, Clock, ArrowRight, BellRing } from "lucide-react";
+import { Ship, Users, AlertTriangle, PackageCheck, Clock, ArrowRight, BellRing, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 
 function Stat({ label, value, icon: Icon, tone = "cyan", testid }) {
   const tones = {
@@ -52,6 +53,16 @@ export default function Dashboard() {
 
   const maxCarrier = Math.max(1, ...(stats?.carriers?.map((c) => c.count) || [1]));
 
+  const ackReport = async (shipmentId) => {
+    try {
+      await api.post(`/shipments/${shipmentId}/ack-cargo-report`);
+      setReminders((prev) => prev.filter((r) => r.shipment_id !== shipmentId));
+      toast.success("Cargo reporting marked done");
+    } catch {
+      toast.error("Failed to mark as done");
+    }
+  };
+
   return (
     <div className="px-4 md:px-8 py-6 md:py-8 max-w-[1600px] mx-auto">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
@@ -88,49 +99,35 @@ export default function Dashboard() {
             <div className="font-mono text-[10px] tracking-widest uppercase text-amber-300">/cargo reporting due</div>
           </div>
           <p className="text-xs text-slate-400 mb-4">
-            FCL: 2 days before ETD (2nd vessel if transhipment). LCL: 10 days before ETA.
+            FCL: 2 days before ETD (2nd vessel if transhipment). LCL: 10 days before ETA. Stays listed until you mark it done.
           </p>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-amber-500/20 text-[10px] font-mono uppercase tracking-widest text-amber-300/80">
-                  <th className="text-left px-3 py-2">Client</th>
-                  <th className="text-left px-3 py-2">Supplier</th>
-                  <th className="text-left px-3 py-2">Vessel</th>
-                  <th className="text-left px-3 py-2">Type</th>
-                  <th className="text-left px-3 py-2">Trigger</th>
-                  <th className="text-right px-3 py-2">Target</th>
-                  <th className="text-right px-3 py-2">Days left</th>
-                  <th className="px-2 py-2"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {reminders.map((r) => {
-                  const overdue = r.days_left < 0;
-                  const today = r.days_left === 0;
-                  return (
-                    <tr key={r.shipment_id} className="border-b border-amber-500/10 hover:bg-amber-500/5" data-testid={`reminder-${r.shipment_id}`}>
-                      <td className="px-3 py-2 text-slate-200">{r.client_name}</td>
-                      <td className="px-3 py-2 text-slate-300">{r.supplier || "—"}</td>
-                      <td className="px-3 py-2 text-slate-200">{r.vessel_name || "—"}</td>
-                      <td className="px-3 py-2">
-                        <span className={`text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border ${r.cargo_type === "LCL" ? "bg-sky-500/10 text-sky-300 border-sky-500/30" : "bg-emerald-500/10 text-emerald-300 border-emerald-500/30"}`}>
-                          {r.cargo_type}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 text-slate-400 text-xs">{r.kind}</td>
-                      <td className="px-3 py-2 text-right font-mono text-xs text-slate-300">{r.target_date}</td>
-                      <td className={`px-3 py-2 text-right font-mono text-sm tabular-nums ${overdue ? "text-rose-300" : today ? "text-amber-300" : "text-amber-200"}`}>
-                        {overdue ? `${Math.abs(r.days_left)}d overdue` : today ? "today" : `${r.days_left}d`}
-                      </td>
-                      <td className="px-2 py-2 text-right">
-                        <Link to={`/clients/${r.client_id}`} className="text-xs text-cyan-400 hover:text-cyan-300" data-testid={`reminder-open-${r.shipment_id}`}>Open →</Link>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div className="divide-y divide-amber-500/10">
+            {reminders.map((r) => {
+              const overdue = r.days_left < 0;
+              const dueToday = r.days_left === 0;
+              return (
+                <div key={r.shipment_id} className="flex items-center justify-between gap-3 py-2.5" data-testid={`reminder-${r.shipment_id}`}>
+                  <div className="min-w-0 flex items-baseline gap-2.5 flex-wrap">
+                    <span className="text-base font-medium text-slate-100 truncate">{r.client_name}</span>
+                    <span className="font-mono text-sm text-slate-300">{r.file_number || "No file #"}</span>
+                    <span className={`font-mono text-xs tabular-nums ${overdue ? "text-rose-300" : dueToday ? "text-amber-300" : "text-amber-200/70"}`}>
+                      {overdue ? `${Math.abs(r.days_left)}d overdue` : dueToday ? "due today" : `due in ${r.days_left}d`}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Button
+                      size="sm" variant="outline"
+                      onClick={() => ackReport(r.shipment_id)}
+                      className="h-7 text-xs border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/10"
+                      data-testid={`ack-reminder-${r.shipment_id}`}
+                    >
+                      <Check className="h-3.5 w-3.5 mr-1" /> Done
+                    </Button>
+                    <Link to={`/clients/${r.client_id}`} className="text-xs text-cyan-400 hover:text-cyan-300" data-testid={`reminder-open-${r.shipment_id}`}>Open →</Link>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

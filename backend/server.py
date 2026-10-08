@@ -140,6 +140,7 @@ class Shipment(BaseModel):
     copy_docs_status: Optional[str] = None
     anf_received: bool = False
     anf_received_at: Optional[str] = None
+    cargo_report_ack_date: Optional[str] = None  # target_date of the cargo-report reminder last marked done
     created_at: str = Field(default_factory=_now_iso)
     updated_at: str = Field(default_factory=_now_iso)
 
@@ -585,7 +586,10 @@ async def update_shipment(shipment_id: str, payload: ShipmentUpdate):
 
 
 def _reminder_for_shipment(s: dict, today: date) -> Optional[dict]:
-    """Return reminder metadata if this shipment needs cargo reporting soon."""
+    """Return reminder metadata if this shipment needs cargo reporting soon.
+    Once a reminder for a given target_date is acknowledged (cargo_report_ack_date
+    matches it), it stays suppressed — unless the trigger date itself changes,
+    which starts a new reporting cycle and surfaces it again."""
     if s.get("anf_received"):
         return None
     cargo = (s.get("cargo_type") or "FCL").upper()
@@ -598,26 +602,29 @@ def _reminder_for_shipment(s: dict, today: date) -> Optional[dict]:
         except Exception:
             return None
         days = (target - today).days
-        if days <= 10:
-            return {"kind": "LCL cargo report (10d before ETA)", "target_date": target_iso, "days_left": days}
-        return None
-    # FCL: use second vessel if present, else primary
-    if s.get("second_vessel_name") and s.get("second_vessel_etd"):
-        target_iso = s["second_vessel_etd"]
-        label = f"Cargo report before 2nd vessel {s['second_vessel_name']}"
+        if days > 10:
+            return None
+        kind = "LCL cargo report (10d before ETA)"
     else:
-        target_iso = s.get("planned_etd")
-        label = "Cargo report before departure"
-    if not target_iso:
+        # FCL: use second vessel if present, else primary
+        if s.get("second_vessel_name") and s.get("second_vessel_etd"):
+            target_iso = s["second_vessel_etd"]
+            kind = f"Cargo report before 2nd vessel {s['second_vessel_name']}"
+        else:
+            target_iso = s.get("planned_etd")
+            kind = "Cargo report before departure"
+        if not target_iso:
+            return None
+        try:
+            target = date.fromisoformat(target_iso)
+        except Exception:
+            return None
+        days = (target - today).days
+        if days > 2:
+            return None
+    if s.get("cargo_report_ack_date") == target_iso:
         return None
-    try:
-        target = date.fromisoformat(target_iso)
-    except Exception:
-        return None
-    days = (target - today).days
-    if days <= 2:
-        return {"kind": label, "target_date": target_iso, "days_left": days}
-    return None
+    return {"kind": kind, "target_date": target_iso, "days_left": days}
 
 
 @api_router.get("/dashboard/reminders")
@@ -635,6 +642,7 @@ async def dashboard_reminders():
                 "shipment_id": s["id"],
                 "client_id": s["client_id"],
                 "client_name": client_lookup.get(s["client_id"], "—"),
+                "file_number": s.get("file_number") or "",
                 "supplier": s.get("supplier") or "",
                 "vessel_name": s.get("second_vessel_name") or s.get("vessel_name") or "",
                 "tracking_doc_number": s.get("tracking_doc_number") or "",
@@ -644,6 +652,17 @@ async def dashboard_reminders():
             })
     reminders.sort(key=lambda r: r["days_left"])
     return {"today": today.isoformat(), "reminders": reminders}
+
+
+@api_router.post("/shipments/{shipment_id}/ack-cargo-report")
+async def ack_cargo_report(shipment_id: str):
+    existing = await db.shipments.find_one({"id": shipment_id}, _proj())
+    if not existing:
+        raise HTTPException(status_code=404, detail="Shipment not found")
+    r = _reminder_for_shipment(existing, date.today())
+    target = r["target_date"] if r else None
+    await db.shipments.update_one({"id": shipment_id}, {"$set": {"cargo_report_ack_date": target, "updated_at": _now_iso()}})
+    return {"ok": True}
 
 
 @api_router.delete("/shipments/{shipment_id}")
