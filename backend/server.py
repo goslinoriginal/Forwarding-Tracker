@@ -87,6 +87,7 @@ class Client(BaseModel):
     contact_email: Optional[str] = None
     notes: Optional[str] = None
     default_pod: Optional[str] = None  # Port of discharge most shipments for this client use
+    pinned: bool = False
     optional_columns: dict = Field(default_factory=lambda: dict(DEFAULT_OPTIONAL_COLUMNS))
     created_at: str = Field(default_factory=_now_iso)
 
@@ -106,6 +107,7 @@ class ClientUpdate(BaseModel):
     contact_email: Optional[str] = None
     notes: Optional[str] = None
     default_pod: Optional[str] = None
+    pinned: Optional[bool] = None
     optional_columns: Optional[dict] = None
 
 
@@ -227,9 +229,22 @@ async def list_vessels():
     return {"vessels": sorted(names)}
 
 
-@api_router.get("/clients", response_model=List[Client])
+@api_router.get("/clients")
 async def list_clients():
     docs = await db.clients.find({}, _proj()).sort("name", 1).to_list(1000)
+    shipments = await db.shipments.find(
+        {"anf_received": {"$ne": True}}, {"_id": 0, "client_id": 1, "status": 1}
+    ).to_list(10000)
+    counts: dict[str, int] = {}
+    on_water: dict[str, int] = {}
+    for s in shipments:
+        cid = s.get("client_id")
+        counts[cid] = counts.get(cid, 0) + 1
+        if s.get("status") == "Shipped":
+            on_water[cid] = on_water.get(cid, 0) + 1
+    for c in docs:
+        c["active_shipment_count"] = counts.get(c["id"], 0)
+        c["on_water_count"] = on_water.get(c["id"], 0)
     return docs
 
 
@@ -266,6 +281,8 @@ async def update_client(client_id: str, payload: ClientUpdate):
             updates[field] = value
     if payload.company is not None and payload.company in COMPANIES:
         updates["company"] = payload.company
+    if payload.pinned is not None:
+        updates["pinned"] = payload.pinned
     if payload.optional_columns is not None:
         merged = dict(existing.get("optional_columns") or DEFAULT_OPTIONAL_COLUMNS)
         for k, v in payload.optional_columns.items():

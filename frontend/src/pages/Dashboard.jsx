@@ -67,8 +67,8 @@ export default function Dashboard() {
     <div className="px-4 md:px-8 py-6 md:py-8 max-w-[1600px] mx-auto">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
         <div>
-          <div className="font-mono text-[11px] tracking-widest uppercase text-cyan-400/80 mb-1.5">
-            /operations · overview
+          <div className="text-xs font-semibold uppercase tracking-wide text-cyan-400/80 mb-1.5">
+            Overview
           </div>
           <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-slate-100">Ocean Freight Command</h1>
           <p className="text-sm text-slate-400 mt-1.5 max-w-2xl">
@@ -96,7 +96,7 @@ export default function Dashboard() {
         <div className="mb-6 rounded-lg border border-amber-500/40 bg-amber-500/5 p-5" data-testid="reminders-panel">
           <div className="flex items-center gap-2 mb-3">
             <BellRing className="h-4 w-4 text-amber-400" />
-            <div className="font-mono text-[10px] tracking-widest uppercase text-amber-300">/cargo reporting due</div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-amber-300">Cargo reporting due</div>
           </div>
           <p className="text-xs text-slate-400 mb-4">
             FCL: 2 days before ETD (2nd vessel if transhipment). LCL: 10 days before ETA. Stays listed until you mark it done.
@@ -137,7 +137,7 @@ export default function Dashboard() {
         <div className="lg:col-span-2 rounded-lg border border-slate-800 bg-slate-900/40 p-5" data-testid="carrier-breakdown">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <div className="font-mono text-[10px] tracking-widest uppercase text-slate-500 mb-1">/carriers</div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">Carriers</div>
               <h2 className="text-lg font-semibold text-slate-100">Live volume by carrier</h2>
             </div>
             <PackageCheck className="h-4 w-4 text-slate-500" />
@@ -169,7 +169,7 @@ export default function Dashboard() {
         <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-5" data-testid="clients-quicklist">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <div className="font-mono text-[10px] tracking-widest uppercase text-slate-500 mb-1">/clients</div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">Clients</div>
               <h2 className="text-lg font-semibold text-slate-100">Recent clients</h2>
             </div>
             <Link to="/clients" className="text-xs text-cyan-400 hover:text-cyan-300" data-testid="all-clients-link">

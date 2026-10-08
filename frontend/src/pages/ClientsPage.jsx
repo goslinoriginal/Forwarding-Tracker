@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, OPTIONAL_COLUMNS, COMPANIES } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -17,7 +17,25 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { Plus, Settings2, Trash2, ArrowRight, FileSpreadsheet } from "lucide-react";
+import { Plus, Settings2, Trash2, ArrowRight, FileSpreadsheet, Star, Ship } from "lucide-react";
+
+const SORT_OPTIONS = [
+  { value: "name_asc", label: "Name (A–Z)" },
+  { value: "name_desc", label: "Name (Z–A)" },
+  { value: "most_shipments", label: "Most shipments" },
+  { value: "fewest_shipments", label: "Fewest shipments" },
+  { value: "on_water", label: "On the water first" },
+  { value: "not_on_water", label: "Not on the water first" },
+];
+
+const SORT_COMPARATORS = {
+  name_asc: (a, b) => a.name.localeCompare(b.name),
+  name_desc: (a, b) => b.name.localeCompare(a.name),
+  most_shipments: (a, b) => (b.active_shipment_count || 0) - (a.active_shipment_count || 0) || a.name.localeCompare(b.name),
+  fewest_shipments: (a, b) => (a.active_shipment_count || 0) - (b.active_shipment_count || 0) || a.name.localeCompare(b.name),
+  on_water: (a, b) => (b.on_water_count || 0) - (a.on_water_count || 0) || a.name.localeCompare(b.name),
+  not_on_water: (a, b) => (a.on_water_count || 0) - (b.on_water_count || 0) || a.name.localeCompare(b.name),
+};
 
 function ColumnToggles({ value, onChange }) {
   return (
@@ -53,12 +71,40 @@ export default function ClientsPage() {
   const [openAdd, setOpenAdd] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ name: "", company: "Clearfreight", contact_email: "", notes: "", default_pod: "", optional_columns: DEFAULT_TOGGLES });
+  const [companyFilter, setCompanyFilter] = useState("all");
+  const [activeOnly, setActiveOnly] = useState(false);
+  const [onWaterOnly, setOnWaterOnly] = useState(false);
+  const [sortMode, setSortMode] = useState("name_asc");
 
   const load = async () => {
     const { data } = await api.get("/clients");
     setClients(data);
   };
   useEffect(() => { load(); }, []);
+
+  const togglePin = async (c) => {
+    const pinned = !c.pinned;
+    setClients((prev) => prev.map((x) => (x.id === c.id ? { ...x, pinned } : x)));
+    try {
+      await api.patch(`/clients/${c.id}`, { pinned });
+    } catch {
+      toast.error("Failed to pin client");
+      load();
+    }
+  };
+
+  const visibleClients = useMemo(() => {
+    let list = clients.filter((c) => {
+      if (companyFilter !== "all" && (c.company || "Patuma") !== companyFilter) return false;
+      if (activeOnly && !(c.active_shipment_count > 0)) return false;
+      if (onWaterOnly && !(c.on_water_count > 0)) return false;
+      return true;
+    });
+    list = [...list].sort(SORT_COMPARATORS[sortMode] || SORT_COMPARATORS.name_asc);
+    const pinned = list.filter((c) => c.pinned);
+    const rest = list.filter((c) => !c.pinned);
+    return [...pinned, ...rest];
+  }, [clients, companyFilter, activeOnly, onWaterOnly, sortMode]);
 
   const resetForm = () => setForm({ name: "", company: "Clearfreight", contact_email: "", notes: "", default_pod: "", optional_columns: DEFAULT_TOGGLES });
 
@@ -106,8 +152,8 @@ export default function ClientsPage() {
     <div className="px-4 md:px-8 py-6 md:py-8 max-w-[1600px] mx-auto">
       <div className="flex items-end justify-between mb-8 gap-4">
         <div>
-          <div className="font-mono text-[11px] tracking-widest uppercase text-cyan-400/80 mb-1.5">
-            /operations · clients
+          <div className="text-xs font-semibold uppercase tracking-wide text-cyan-400/80 mb-1.5">
+            Clients
           </div>
           <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-slate-100">Client roster</h1>
           <p className="text-sm text-slate-400 mt-1.5">
@@ -202,27 +248,88 @@ export default function ClientsPage() {
           <p className="text-sm text-slate-500 mt-1">Add your first client to start tracking shipments.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {clients.map((c) => {
-            const enabled = OPTIONAL_COLUMNS.filter((col) => c.optional_columns?.[col.key]);
-            return (
-              <div
-                key={c.id}
-                className="rounded-lg border border-slate-800 bg-slate-900/40 hover:border-cyan-500/40 transition-colors p-5 group"
-                data-testid={`client-card-${c.id}`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="font-mono text-[10px] tracking-widest uppercase text-slate-500 mb-1 flex items-center gap-2">
-                      <span>/client</span>
-                      <span className={`px-1.5 py-0.5 rounded border ${c.company === "Clearfreight" ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/30" : "bg-cyan-500/10 text-cyan-300 border-cyan-500/30"}`}>
-                        {c.company || "Patuma"}
-                      </span>
+        <>
+          <div className="flex flex-wrap items-center gap-2 mb-4">
+            <div className="flex items-center gap-0.5 rounded-md border border-slate-800 bg-slate-900/60 p-0.5">
+              {["all", "Clearfreight", "Patuma"].map((opt) => (
+                <button
+                  key={opt}
+                  onClick={() => setCompanyFilter(opt)}
+                  data-testid={`filter-company-${opt.toLowerCase()}`}
+                  className={`px-3 py-1.5 text-xs font-medium rounded ${companyFilter === opt ? "bg-cyan-500/15 text-cyan-300" : "text-slate-400 hover:text-slate-200"}`}
+                >
+                  {opt === "all" ? "All" : opt}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setActiveOnly((v) => !v)}
+              data-testid="filter-active-only"
+              className={`px-3 py-1.5 text-xs font-medium rounded-md border ${activeOnly ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300" : "border-slate-800 text-slate-400 hover:text-slate-200"}`}
+            >
+              Has active shipments
+            </button>
+            <button
+              onClick={() => setOnWaterOnly((v) => !v)}
+              data-testid="filter-on-water"
+              className={`px-3 py-1.5 text-xs font-medium rounded-md border ${onWaterOnly ? "border-sky-500/40 bg-sky-500/10 text-sky-300" : "border-slate-800 text-slate-400 hover:text-slate-200"}`}
+            >
+              On the water
+            </button>
+            <div className="sm:ml-auto">
+              <Select value={sortMode} onValueChange={setSortMode}>
+                <SelectTrigger className="w-52 h-9 bg-slate-900 border-slate-800 text-xs" data-testid="sort-select"><SelectValue /></SelectTrigger>
+                <SelectContent className="bg-slate-900 border-slate-800">
+                  {SORT_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {visibleClients.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-slate-800 p-10 text-center bg-slate-900/30">
+              <p className="text-sm text-slate-500">No clients match these filters.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {visibleClients.map((c) => (
+                <div
+                  key={c.id}
+                  className={`flex items-center gap-3 rounded-lg border p-3.5 transition-colors ${c.pinned ? "border-amber-500/30 bg-amber-500/5" : "border-slate-800 bg-slate-900/40 hover:border-cyan-500/30"}`}
+                  data-testid={`client-card-${c.id}`}
+                >
+                  <button
+                    onClick={() => togglePin(c)}
+                    title={c.pinned ? "Unpin" : "Pin to top"}
+                    data-testid={`pin-client-${c.id}`}
+                    className={`shrink-0 h-9 w-9 rounded-md border flex items-center justify-center transition-colors ${c.pinned ? "border-amber-500/40 bg-amber-500/10 text-amber-300" : "border-slate-800 text-slate-500 hover:text-amber-300 hover:border-amber-500/30"}`}
+                  >
+                    <Star className={`h-4 w-4 ${c.pinned ? "fill-amber-300" : ""}`} />
+                  </button>
+
+                  <Link to={`/clients/${c.id}`} data-testid={`open-client-${c.id}`} className="min-w-0 flex-1 flex items-center gap-4">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-base font-semibold text-slate-100 truncate">{c.name}</h3>
+                        <span className={`text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border ${c.company === "Clearfreight" ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/30" : "bg-cyan-500/10 text-cyan-300 border-cyan-500/30"}`}>
+                          {c.company || "Patuma"}
+                        </span>
+                      </div>
+                      {c.contact_email && <div className="text-xs text-slate-500 mt-0.5 truncate">{c.contact_email}</div>}
                     </div>
-                    <h3 className="text-lg font-semibold text-slate-100 truncate">{c.name}</h3>
-                    {c.contact_email && <div className="text-xs text-slate-500 mt-0.5 truncate">{c.contact_email}</div>}
-                  </div>
-                  <div className="flex gap-1">
+                    <div className="hidden sm:flex items-center gap-2 shrink-0">
+                      <span className="text-xs font-mono px-2 py-1 rounded border border-slate-800 bg-slate-950/50 text-slate-300 whitespace-nowrap">
+                        {c.active_shipment_count || 0} active
+                      </span>
+                      {c.on_water_count > 0 && (
+                        <span className="inline-flex items-center gap-1 text-xs font-mono px-2 py-1 rounded border border-sky-500/30 bg-sky-500/10 text-sky-300 whitespace-nowrap">
+                          <Ship className="h-3 w-3" /> {c.on_water_count} on the water
+                        </span>
+                      )}
+                    </div>
+                  </Link>
+
+                  <div className="flex items-center gap-1 shrink-0">
                     <Button
                       size="sm" variant="ghost"
                       onClick={() => startEdit(c)}
@@ -252,31 +359,15 @@ export default function ClientsPage() {
                         </AlertDialogFooter>
                       </AlertDialogContent>
                     </AlertDialog>
+                    <Link to={`/clients/${c.id}`} className="h-8 w-8 flex items-center justify-center text-slate-600">
+                      <ArrowRight className="h-4 w-4" />
+                    </Link>
                   </div>
                 </div>
-
-                <div className="mt-4 flex flex-wrap gap-1.5">
-                  {enabled.length === 0 ? (
-                    <span className="text-[11px] text-slate-500 font-mono">Standard columns only</span>
-                  ) : enabled.map((col) => (
-                    <span key={col.key} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/25">
-                      + {col.label}
-                    </span>
-                  ))}
-                </div>
-
-                <Link
-                  to={`/clients/${c.id}`}
-                  data-testid={`open-client-${c.id}`}
-                  className="mt-5 flex items-center justify-between text-sm text-cyan-400 hover:text-cyan-300"
-                >
-                  <span>Open status report</span>
-                  <ArrowRight className="h-4 w-4" />
-                </Link>
-              </div>
-            );
-          })}
-        </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

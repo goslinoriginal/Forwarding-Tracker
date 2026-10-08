@@ -489,9 +489,9 @@ export default function ClientDetail() {
           <Link to="/clients" className="inline-flex items-center gap-1 text-xs font-mono text-slate-500 hover:text-slate-300" data-testid="back-clients">
             <ArrowLeft className="h-3 w-3" /> Back to clients
           </Link>
-          <div className="font-mono text-[11px] tracking-widest uppercase text-cyan-400/80 mt-2 flex items-center gap-2">
-            <span>/client · status report</span>
-            <span className={`px-1.5 py-0.5 rounded border ${client.company === "Clearfreight" ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/30" : "bg-cyan-500/10 text-cyan-300 border-cyan-500/30"}`}>
+          <div className="text-xs font-semibold uppercase tracking-wide text-cyan-400/80 mt-2 flex items-center gap-2">
+            <span>Status report</span>
+            <span className={`px-1.5 py-0.5 rounded border font-mono normal-case ${client.company === "Clearfreight" ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/30" : "bg-cyan-500/10 text-cyan-300 border-cyan-500/30"}`}>
               {client.company || "Patuma"}
             </span>
           </div>
