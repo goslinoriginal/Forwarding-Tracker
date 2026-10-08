@@ -29,11 +29,20 @@ import {
 const emptyShipment = {
   supplier: "", order_booking_file: "", file_number: "", cargo_type: "FCL", status: "Booked",
   sob_date: "", vessel_name: "", tracking_doc_number: "", carrier: "MSC",
-  pol: "", pod: "", eta: "", planned_etd: "", planned_eta: "",
+  pol: "", pod: "", eta: "", planned_etd: "", etd_tba: false, planned_eta: "",
   second_vessel_name: "", second_vessel_etd: "",
   final_destination: "", comments: "",
   hbill_released: null, expected_freight_rate: "", copy_docs_status: "",
 };
+
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function isEtdOverdue(s) {
+  return !!s.planned_etd && !s.sob_date && !s.etd_tba && s.planned_etd < todayISO();
+}
 
 const STATUS_STYLES_LOCAL = {
   Planned: "bg-slate-500/10 text-slate-300 border-slate-500/30",
@@ -72,6 +81,7 @@ function DatePickerButton({ label, icon: Icon, tone, onPick, testid, disabled })
   const tones = {
     rose: "text-rose-300 hover:bg-rose-500/10 border-rose-500/30",
     emerald: "text-emerald-300 hover:bg-emerald-500/10 border-emerald-500/30",
+    amber: "text-amber-300 hover:bg-amber-500/10 border-amber-500/30",
   };
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -99,6 +109,46 @@ function DatePickerButton({ label, icon: Icon, tone, onPick, testid, disabled })
           }}
           initialFocus
         />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function VesselInput({ value, onChange, vessels, placeholder, testid }) {
+  const [open, setOpen] = useState(false);
+  const matches = useMemo(() => {
+    const q = (value || "").trim().toLowerCase();
+    const pool = q ? vessels.filter((v) => v.toLowerCase().includes(q) && v.toLowerCase() !== q) : vessels;
+    return pool.slice(0, 8);
+  }, [value, vessels]);
+  return (
+    <Popover open={open && matches.length > 0} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Input
+          value={value || ""}
+          onChange={(e) => { onChange(e.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          autoComplete="off"
+          className="mt-1 bg-slate-900 border-slate-800"
+          data-testid={testid}
+          placeholder={placeholder}
+        />
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        onOpenAutoFocus={(e) => e.preventDefault()}
+        className="w-[--radix-popover-trigger-width] p-1 bg-slate-950 border-slate-800"
+      >
+        {matches.map((v) => (
+          <button
+            key={v}
+            type="button"
+            onClick={() => { onChange(v); setOpen(false); }}
+            className="w-full text-left px-2 py-1.5 text-xs rounded hover:bg-cyan-500/10 text-slate-200 truncate"
+          >
+            {v}
+          </button>
+        ))}
       </PopoverContent>
     </Popover>
   );
@@ -137,7 +187,7 @@ function VesselCell({ ship }) {
   );
 }
 
-function ShipmentForm({ value, onChange, showOptional }) {
+function ShipmentForm({ value, onChange, showOptional, vessels }) {
   const set = (patch) => onChange({ ...value, ...patch });
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -183,15 +233,29 @@ function ShipmentForm({ value, onChange, showOptional }) {
       </div>
       <div>
         <Label className="text-xs uppercase tracking-wider font-mono text-slate-400">Vessel name (1st)</Label>
-        <Input value={value.vessel_name} onChange={(e) => set({ vessel_name: e.target.value })} className="mt-1 bg-slate-900 border-slate-800" data-testid="ship-vessel-input" placeholder="e.g. MSC Maya" />
+        <VesselInput value={value.vessel_name} onChange={(v) => set({ vessel_name: v })} vessels={vessels} testid="ship-vessel-input" placeholder="e.g. MSC Maya" />
       </div>
       <div>
-        <Label className="text-xs uppercase tracking-wider font-mono text-slate-400">Planned ETD (1st vessel)</Label>
-        <Input type="date" value={value.planned_etd || ""} onChange={(e) => set({ planned_etd: e.target.value })} className="mt-1 bg-slate-900 border-slate-800" data-testid="ship-planned-etd-input" />
+        <div className="flex items-center justify-between">
+          <Label className="text-xs uppercase tracking-wider font-mono text-slate-400">Planned ETD (1st vessel)</Label>
+          <button
+            type="button"
+            onClick={() => set({ etd_tba: !value.etd_tba, planned_etd: value.etd_tba ? value.planned_etd : "" })}
+            data-testid="ship-etd-tba-toggle"
+            className={`text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border ${value.etd_tba ? "bg-amber-500/15 border-amber-500/40 text-amber-200" : "border-slate-800 text-slate-500 hover:text-slate-300"}`}
+          >
+            ETD TBA
+          </button>
+        </div>
+        {value.etd_tba ? (
+          <div className="mt-1 h-9 flex items-center px-3 rounded-md border border-amber-500/30 bg-amber-500/5 text-amber-200 text-sm">TBA — no date yet</div>
+        ) : (
+          <Input type="date" value={value.planned_etd || ""} onChange={(e) => set({ planned_etd: e.target.value })} className="mt-1 bg-slate-900 border-slate-800" data-testid="ship-planned-etd-input" />
+        )}
       </div>
       <div>
         <Label className="text-xs uppercase tracking-wider font-mono text-slate-400">2nd Vessel (transhipment)</Label>
-        <Input value={value.second_vessel_name || ""} onChange={(e) => set({ second_vessel_name: e.target.value })} className="mt-1 bg-slate-900 border-slate-800" data-testid="ship-second-vessel-input" placeholder="Optional" />
+        <VesselInput value={value.second_vessel_name || ""} onChange={(v) => set({ second_vessel_name: v })} vessels={vessels} testid="ship-second-vessel-input" placeholder="Optional" />
       </div>
       <div>
         <Label className="text-xs uppercase tracking-wider font-mono text-slate-400">Planned ETD (2nd vessel)</Label>
@@ -276,14 +340,17 @@ export default function ClientDetail() {
   const [editingShip, setEditingShip] = useState(null);
   const [form, setForm] = useState({ ...emptyShipment });
   const [showArchived, setShowArchived] = useState(false);
+  const [vessels, setVessels] = useState([]);
 
   const load = async () => {
-    const [c, s] = await Promise.all([
+    const [c, s, v] = await Promise.all([
       api.get(`/clients/${clientId}`),
       api.get(`/shipments`, { params: { client_id: clientId } }),
+      api.get(`/vessels`),
     ]);
     setClient(c.data);
     setShipments(s.data);
+    setVessels(v.data.vessels || []);
   };
 
   useEffect(() => { load(); }, [clientId]);
@@ -302,7 +369,7 @@ export default function ClientDetail() {
       await api.post("/shipments", { ...form, client_id: clientId });
       toast.success("Shipment added");
       setOpenAdd(false);
-      setForm({ ...emptyShipment });
+      setForm({ ...emptyShipment, pod: client?.default_pod || "" });
       load();
     } catch { toast.error("Failed to save"); }
   };
@@ -333,7 +400,7 @@ export default function ClientDetail() {
       sob_date: s.sob_date || "", vessel_name: s.vessel_name || "",
       tracking_doc_number: s.tracking_doc_number || "", carrier: s.carrier || "Other",
       pol: s.pol || "", pod: s.pod || "", eta: s.eta || "",
-      planned_etd: s.planned_etd || "", planned_eta: s.planned_eta || "",
+      planned_etd: s.planned_etd || "", etd_tba: !!s.etd_tba, planned_eta: s.planned_eta || "",
       second_vessel_name: s.second_vessel_name || "", second_vessel_etd: s.second_vessel_etd || "",
       final_destination: s.final_destination || "", comments: s.comments || "",
       hbill_released: s.hbill_released ?? null,
@@ -452,7 +519,11 @@ export default function ClientDetail() {
           </Button>
           <Dialog open={openAdd} onOpenChange={setOpenAdd}>
             <DialogTrigger asChild>
-              <Button className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-medium" data-testid="add-shipment-button">
+              <Button
+                onClick={() => setForm({ ...emptyShipment, pod: client?.default_pod || "" })}
+                className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-medium"
+                data-testid="add-shipment-button"
+              >
                 <Plus className="mr-1.5 h-4 w-4" /> New shipment
               </Button>
             </DialogTrigger>
@@ -461,7 +532,7 @@ export default function ClientDetail() {
                 <DialogTitle className="text-slate-100">New shipment for {client.name}</DialogTitle>
                 <DialogDescription className="text-slate-400">Enter tracking info. Track-trace.com deep link will use the doc number.</DialogDescription>
               </DialogHeader>
-              <ShipmentForm value={form} onChange={setForm} showOptional={showOptional} />
+              <ShipmentForm value={form} onChange={setForm} showOptional={showOptional} vessels={vessels} />
               <DialogFooter>
                 <Button variant="outline" onClick={() => setOpenAdd(false)} className="border-slate-700" data-testid="cancel-shipment-button">Cancel</Button>
                 <Button onClick={submitAdd} className="bg-cyan-500 hover:bg-cyan-400 text-slate-950" data-testid="save-shipment-button">Add shipment</Button>
@@ -527,7 +598,7 @@ export default function ClientDetail() {
                 {visibleShipments.map((s, idx) => (
                   <tr
                     key={s.id}
-                    className={`border-b border-slate-800 align-top ${s.anf_received ? "bg-purple-500/5" : idx % 2 === 0 ? "bg-slate-950" : "bg-slate-900/40"}`}
+                    className={`border-b align-top ${isEtdOverdue(s) ? "border-amber-500/30 bg-amber-500/5" : "border-slate-800"} ${!isEtdOverdue(s) && (s.anf_received ? "bg-purple-500/5" : idx % 2 === 0 ? "bg-slate-950" : "bg-slate-900/40")}`}
                     data-testid={`shipment-row-${s.id}`}
                   >
                     <td className="px-1.5 py-2 text-slate-200 text-xs break-words" title={s.supplier}>{s.supplier}</td>
@@ -582,6 +653,12 @@ export default function ClientDetail() {
                     {showOptional.expected_freight_rate && <td className="px-1.5 py-2 font-mono text-[11px] text-slate-300 break-words">{s.expected_freight_rate}</td>}
                     <td className="px-1.5 py-2">
                       <div className="flex flex-col gap-1">
+                        {isEtdOverdue(s) && (
+                          <div className="flex items-center gap-1 px-1.5 py-1 rounded border border-amber-500/40 bg-amber-500/10 text-amber-200 text-[9px] leading-tight" data-testid={`etd-overdue-${s.id}`}>
+                            <AlertTriangle className="h-3 w-3 shrink-0" />
+                            <span>ETD {s.planned_etd} passed — sailed?</span>
+                          </div>
+                        )}
                         <div className="flex items-center gap-1 flex-wrap">
                           {s.sob_date ? (
                             <button
@@ -594,12 +671,40 @@ export default function ClientDetail() {
                             </button>
                           ) : (
                             <DatePickerButton
-                              label="1st Sailed"
+                              label={isEtdOverdue(s) ? "Sailed?" : "1st Sailed"}
                               icon={Sailboat}
                               tone="emerald"
                               onPick={(iso) => setVesselSailed(s, 1, iso)}
                               testid={`mark-first-sailed-${s.id}`}
                               disabled={s.anf_received}
+                            />
+                          )}
+                          {isEtdOverdue(s) && !s.anf_received && (
+                            <>
+                              <DatePickerButton
+                                label="New ETD"
+                                icon={CalendarClock}
+                                tone="amber"
+                                onPick={(iso) => patchShip(s.id, { planned_etd: iso })}
+                                testid={`new-etd-${s.id}`}
+                              />
+                              <button
+                                onClick={() => patchShip(s.id, { etd_tba: true })}
+                                data-testid={`mark-etd-tba-${s.id}`}
+                                title="No new date yet — mark ETD as TBA"
+                                className="inline-flex items-center gap-1 h-6 px-1.5 rounded border text-[10px] font-mono uppercase tracking-wider text-amber-300 hover:bg-amber-500/10 border-amber-500/30"
+                              >
+                                TBA
+                              </button>
+                            </>
+                          )}
+                          {s.etd_tba && !isEtdOverdue(s) && !s.sob_date && !s.anf_received && (
+                            <DatePickerButton
+                              label="Set ETD"
+                              icon={CalendarClock}
+                              tone="amber"
+                              onPick={(iso) => patchShip(s.id, { planned_etd: iso })}
+                              testid={`set-etd-from-tba-${s.id}`}
                             />
                           )}
                           {s.second_vessel_name ? (
@@ -667,7 +772,7 @@ export default function ClientDetail() {
           <DialogHeader>
             <DialogTitle className="text-slate-100">Edit shipment</DialogTitle>
           </DialogHeader>
-          <ShipmentForm value={form} onChange={setForm} showOptional={showOptional} />
+          <ShipmentForm value={form} onChange={setForm} showOptional={showOptional} vessels={vessels} />
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpenEdit(false)} className="border-slate-700">Cancel</Button>
             <Button onClick={submitEdit} className="bg-cyan-500 hover:bg-cyan-400 text-slate-950" data-testid="save-edit-shipment">Save</Button>

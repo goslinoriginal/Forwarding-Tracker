@@ -86,6 +86,7 @@ class Client(BaseModel):
     company: str = "Patuma"  # Patuma or Clearfreight
     contact_email: Optional[str] = None
     notes: Optional[str] = None
+    default_pod: Optional[str] = None  # Port of discharge most shipments for this client use
     optional_columns: dict = Field(default_factory=lambda: dict(DEFAULT_OPTIONAL_COLUMNS))
     created_at: str = Field(default_factory=_now_iso)
 
@@ -95,6 +96,7 @@ class ClientCreate(BaseModel):
     company: str = "Patuma"
     contact_email: Optional[str] = None
     notes: Optional[str] = None
+    default_pod: Optional[str] = None
     optional_columns: Optional[dict] = None
 
 
@@ -103,6 +105,7 @@ class ClientUpdate(BaseModel):
     company: Optional[str] = None
     contact_email: Optional[str] = None
     notes: Optional[str] = None
+    default_pod: Optional[str] = None
     optional_columns: Optional[dict] = None
 
 
@@ -123,6 +126,7 @@ class Shipment(BaseModel):
     pod: str = ""
     eta: Optional[str] = None
     planned_etd: Optional[str] = None  # ISO date YYYY-MM-DD
+    etd_tba: bool = False  # true when the 1st vessel's ETD lapsed and no new date is set yet
     planned_eta: Optional[str] = None  # ISO date YYYY-MM-DD
     second_vessel_name: Optional[str] = None
     second_vessel_etd: Optional[str] = None  # ISO date YYYY-MM-DD
@@ -155,6 +159,7 @@ class ShipmentCreate(BaseModel):
     pod: str = ""
     eta: Optional[str] = None
     planned_etd: Optional[str] = None
+    etd_tba: bool = False
     planned_eta: Optional[str] = None
     second_vessel_name: Optional[str] = None
     second_vessel_etd: Optional[str] = None
@@ -180,6 +185,7 @@ class ShipmentUpdate(BaseModel):
     pod: Optional[str] = None
     eta: Optional[str] = None
     planned_etd: Optional[str] = None
+    etd_tba: Optional[bool] = None
     planned_eta: Optional[str] = None
     second_vessel_name: Optional[str] = None
     second_vessel_etd: Optional[str] = None
@@ -210,6 +216,16 @@ async def list_carriers():
     return {"carriers": CARRIERS}
 
 
+@api_router.get("/vessels")
+async def list_vessels():
+    names: set[str] = set()
+    for field in ("vessel_name", "second_vessel_name"):
+        for v in await db.shipments.distinct(field):
+            if v and v.strip():
+                names.add(v.strip())
+    return {"vessels": sorted(names)}
+
+
 @api_router.get("/clients", response_model=List[Client])
 async def list_clients():
     docs = await db.clients.find({}, _proj()).sort("name", 1).to_list(1000)
@@ -227,6 +243,7 @@ async def create_client(payload: ClientCreate):
         company=company,
         contact_email=payload.contact_email,
         notes=payload.notes,
+        default_pod=payload.default_pod,
         optional_columns=optional_columns,
     )
     await db.clients.insert_one(client_obj.model_dump())
@@ -242,7 +259,7 @@ async def get_client(client_id: str):
 async def update_client(client_id: str, payload: ClientUpdate):
     existing = await _get_client(client_id)
     updates: dict[str, Any] = {}
-    for field in ["name", "contact_email", "notes"]:
+    for field in ["name", "contact_email", "notes", "default_pod"]:
         value = getattr(payload, field)
         if value is not None:
             updates[field] = value
@@ -281,13 +298,18 @@ async def list_shipments(client_id: Optional[str] = None, include_anf: bool = Tr
     if not include_anf:
         query["anf_received"] = {"$ne": True}
     docs = await db.shipments.find(query, _proj()).sort("created_at", -1).to_list(5000)
+    for d in docs:
+        d["comments"] = _regenerate_comment(d)
+        d["status"] = _derive_status(d)
     return docs
 
 
 @api_router.post("/shipments", response_model=Shipment)
 async def create_shipment(payload: ShipmentCreate):
-    await _get_client(payload.client_id)
+    client = await _get_client(payload.client_id)
     data = payload.model_dump()
+    if not (data.get("pod") or "").strip() and client.get("default_pod"):
+        data["pod"] = client["default_pod"]
     ship = Shipment(**data)
     ship_dict = ship.model_dump()
     ship_dict["comments"] = _regenerate_comment(ship_dict)
@@ -332,8 +354,18 @@ def _regenerate_comment(ship: dict) -> str:
     # First vessel clause
     first_label = " (1st Vessel)" if has_second else ""
     first_state = (ship.get("first_vessel_state") or "planned").lower()
+    etd_overdue = False
+    if ship.get("planned_etd"):
+        try:
+            etd_overdue = date.fromisoformat(ship["planned_etd"]) < today
+        except Exception:
+            pass
     if first_sailed:
         parts.append(f"SOB {_plain_dd_mm(ship.get('sob_date'))}{first_label}.")
+    elif ship.get("etd_tba") or etd_overdue:
+        # A lapsed ETD never gets shown as-is — the client should never see a date that's
+        # already in the past. Falls back to TBA until a new date (or explicit TBA) is set.
+        parts.append(f"ETD TBA{first_label}.")
     elif ship.get("planned_etd"):
         etd_txt = _plain_dd_mm(ship["planned_etd"])
         if first_state == "delayed":
@@ -372,11 +404,10 @@ def _regenerate_comment(ship: dict) -> str:
 
 
 def _derive_status(ship: dict) -> str:
-    """Only three states: Planned, Booked, Shipped. Never Delayed."""
-    has_second = bool((ship.get("second_vessel_name") or "").strip()) or bool(ship.get("second_vessel_etd")) or bool(ship.get("second_vessel_sob_date"))
-    first_sailed = bool(ship.get("sob_date"))
-    second_sailed = bool(ship.get("second_vessel_sob_date"))
-    if first_sailed and (not has_second or second_sailed):
+    """Only three states: Planned, Booked, Shipped. Never Delayed.
+    The 1st vessel sailing is what moves cargo — status flips to Shipped as soon as
+    sob_date is set, even if a 2nd (transshipment) vessel hasn't sailed yet."""
+    if ship.get("sob_date"):
         return "Shipped"
     if ship.get("vessel_name") or ship.get("planned_etd") or ship.get("tracking_doc_number"):
         return "Booked"
@@ -510,6 +541,11 @@ async def update_shipment(shipment_id: str, payload: ShipmentUpdate):
     if not existing:
         raise HTTPException(status_code=404, detail="Shipment not found")
     updates = payload.model_dump(exclude_none=True)
+    # planned_etd and etd_tba are mutually exclusive — setting one clears the other
+    if updates.get("etd_tba"):
+        updates["planned_etd"] = None
+    elif updates.get("planned_etd"):
+        updates["etd_tba"] = False
     if "anf_received" in updates and updates["anf_received"] and not existing.get("anf_received"):
         updates["anf_received_at"] = _now_iso()
     if "anf_received" in updates and not updates["anf_received"]:
@@ -731,6 +767,9 @@ async def _report_rows(client_id: str):
         {"client_id": client_id, "anf_received": {"$ne": True}},
         _proj(),
     ).sort("created_at", 1).to_list(5000)
+    for s in shipments:
+        s["comments"] = _regenerate_comment(s)
+        s["status"] = _derive_status(s)
     columns = _columns_for_client(client)
     rows = [{key: _cell_value(key, s) for key, _ in columns} for s in shipments]
     return client, columns, rows

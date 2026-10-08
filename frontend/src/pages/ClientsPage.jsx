@@ -52,7 +52,7 @@ export default function ClientsPage() {
   const [clients, setClients] = useState([]);
   const [openAdd, setOpenAdd] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ name: "", company: "Patuma", contact_email: "", notes: "", optional_columns: DEFAULT_TOGGLES });
+  const [form, setForm] = useState({ name: "", company: "Patuma", contact_email: "", notes: "", default_pod: "", optional_columns: DEFAULT_TOGGLES });
 
   const load = async () => {
     const { data } = await api.get("/clients");
@@ -60,7 +60,7 @@ export default function ClientsPage() {
   };
   useEffect(() => { load(); }, []);
 
-  const resetForm = () => setForm({ name: "", company: "Patuma", contact_email: "", notes: "", optional_columns: DEFAULT_TOGGLES });
+  const resetForm = () => setForm({ name: "", company: "Patuma", contact_email: "", notes: "", default_pod: "", optional_columns: DEFAULT_TOGGLES });
 
   const submit = async () => {
     if (!form.name.trim()) { toast.error("Client name is required"); return; }
@@ -88,6 +88,7 @@ export default function ClientsPage() {
       company: c.company || "Patuma",
       contact_email: c.contact_email || "",
       notes: c.notes || "",
+      default_pod: c.default_pod || "",
       optional_columns: { ...DEFAULT_TOGGLES, ...(c.optional_columns || {}) },
     });
     setOpenAdd(true);
@@ -164,6 +165,16 @@ export default function ClientsPage() {
                   onChange={(e) => setForm({ ...form, notes: e.target.value })}
                   placeholder="Internal notes about this client…"
                   data-testid="client-notes-input"
+                  className="mt-1.5 bg-slate-900 border-slate-800"
+                />
+              </div>
+              <div>
+                <Label className="text-slate-300 text-xs uppercase tracking-wider font-mono">Default POD (Port of discharge)</Label>
+                <Input
+                  value={form.default_pod}
+                  onChange={(e) => setForm({ ...form, default_pod: e.target.value })}
+                  placeholder="e.g. Durban — pre-fills new shipments for this client"
+                  data-testid="client-default-pod-input"
                   className="mt-1.5 bg-slate-900 border-slate-800"
                 />
               </div>
