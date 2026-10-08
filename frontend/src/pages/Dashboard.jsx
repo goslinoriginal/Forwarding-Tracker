@@ -296,8 +296,13 @@ export default function Dashboard() {
                 className="flex items-center gap-3 py-2.5 px-1 hover:bg-slate-900/60 transition-colors rounded-md"
               >
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-2.5 flex-wrap">
                     <span className="text-sm font-semibold text-slate-100 truncate">{s.client_name}</span>
+                    {s.file_number && (
+                      <span className="text-lg font-bold font-mono text-cyan-300 tracking-tight truncate" data-testid={`all-ship-filenum-${s.id}`}>
+                        {s.file_number}
+                      </span>
+                    )}
                     <span className={`text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border ${SHIP_STATUS_STYLES[s.status] || SHIP_STATUS_STYLES.Booked}`}>
                       {s.status}
                     </span>
@@ -308,22 +313,22 @@ export default function Dashboard() {
                     {s.second_vessel_name && ` → ${s.second_vessel_name}`}
                   </div>
                 </div>
-                <div className="hidden md:flex items-center gap-5 shrink-0 text-right">
-                  <div className="w-24">
-                    <div className="text-[9px] font-mono uppercase tracking-widest text-slate-500 flex items-center justify-end gap-1">
+                <div className="hidden md:flex items-center gap-6 shrink-0 text-right">
+                  <div className="w-32">
+                    <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 flex items-center justify-end gap-1">
                       <ArrowUpFromLine className="h-2.5 w-2.5" /> Departs
                     </div>
-                    <div className={`text-xs font-mono mt-0.5 ${s.sob_date ? "text-emerald-300" : "text-slate-300"}`}>
+                    <div className={`text-xl font-mono font-semibold mt-0.5 ${s.sob_date ? "text-emerald-300" : "text-slate-200"}`}>
                       {s.departure_iso || (s.etd_tba ? "TBA" : "—")}
                     </div>
                   </div>
-                  <div className="w-24">
-                    <div className="text-[9px] font-mono uppercase tracking-widest text-slate-500 flex items-center justify-end gap-1">
+                  <div className="w-32">
+                    <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 flex items-center justify-end gap-1">
                       <ArrowDownToLine className="h-2.5 w-2.5" /> Arrives
                     </div>
-                    <div className="text-xs font-mono mt-0.5 text-slate-200">{s.arrival_iso || "—"}</div>
+                    <div className="text-xl font-mono font-semibold mt-0.5 text-slate-100">{s.arrival_iso || "—"}</div>
                     {s.arrival_iso && (
-                      <div className={`text-[10px] mt-0.5 ${s.arrival_days < 0 ? "text-rose-300" : s.arrival_days <= 3 ? "text-amber-300" : "text-slate-500"}`}>
+                      <div className={`text-xs mt-0.5 ${s.arrival_days < 0 ? "text-rose-300" : s.arrival_days <= 3 ? "text-amber-300" : "text-slate-500"}`}>
                         {dayLabel(s.arrival_days)}
                       </div>
                     )}
