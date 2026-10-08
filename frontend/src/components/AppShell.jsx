@@ -21,8 +21,8 @@ export default function AppShell({ children }) {
               <Anchor className="h-4 w-4 text-cyan-500 dark:text-cyan-400" strokeWidth={2.4} />
             </div>
             <div className="leading-tight">
-              <div className="font-mono text-[11px] tracking-widest uppercase text-cyan-500/80 dark:text-cyan-400/80">Ocean OPS</div>
-              <div className="font-semibold text-sm">Freight Tracker</div>
+              <div className="font-mono text-[11px] tracking-widest uppercase text-cyan-500/80 dark:text-cyan-400/80">C-Freight</div>
+              <div className="font-semibold text-sm">Portal</div>
             </div>
           </div>
           <button
@@ -68,7 +68,7 @@ export default function AppShell({ children }) {
           >
             <Anchor className="h-4 w-4 text-cyan-400" />
           </button>
-          <div className="text-sm font-semibold text-slate-100">Ocean OPS</div>
+          <div className="text-sm font-semibold text-slate-100">C-Freight Portal</div>
         </div>
         {children}
       </main>

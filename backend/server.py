@@ -35,7 +35,7 @@ mongo_url = os.environ["MONGO_URL"]
 mongo_client = AsyncIOMotorClient(mongo_url)
 db = mongo_client[os.environ["DB_NAME"]]
 
-app = FastAPI(title="Ocean Freight Tracker API")
+app = FastAPI(title="C-Freight Portal API")
 api_router = APIRouter(prefix="/api")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -144,6 +144,9 @@ class Shipment(BaseModel):
     second_vessel_sob_date: Optional[str] = None  # ISO date YYYY-MM-DD (set when 2nd vessel has sailed)
     first_vessel_state: str = "planned"  # planned | delayed | changed (sailed handled by sob_date)
     second_vessel_state: str = "planned"
+    first_vessel_delay_days: Optional[int] = None  # size of the last ETD push, for comment wording
+    second_vessel_delay_days: Optional[int] = None
+    extra_vessels: List[dict] = Field(default_factory=list)  # legs beyond the 2nd: [{id, name, planned_etd, sob_date, state, delay_days}]
     final_destination: Optional[str] = None
     comments: str = ""
     hbill_released: Optional[bool] = None
@@ -176,6 +179,7 @@ class ShipmentCreate(BaseModel):
     second_vessel_name: Optional[str] = None
     second_vessel_etd: Optional[str] = None
     second_vessel_sob_date: Optional[str] = None
+    extra_vessels: Optional[List[dict]] = None
     final_destination: Optional[str] = None
     comments: str = ""
     hbill_released: Optional[bool] = None
@@ -202,6 +206,7 @@ class ShipmentUpdate(BaseModel):
     second_vessel_name: Optional[str] = None
     second_vessel_etd: Optional[str] = None
     second_vessel_sob_date: Optional[str] = None
+    extra_vessels: Optional[List[dict]] = None
     final_destination: Optional[str] = None
     comments: Optional[str] = None
     hbill_released: Optional[bool] = None
@@ -235,6 +240,11 @@ async def list_vessels():
         for v in await db.shipments.distinct(field):
             if v and v.strip():
                 names.add(v.strip())
+    async for doc in db.shipments.find({"extra_vessels": {"$exists": True, "$ne": []}}, {"_id": 0, "extra_vessels": 1}):
+        for ev in doc.get("extra_vessels") or []:
+            v = (ev.get("name") or "").strip()
+            if v:
+                names.add(v)
     return {"vessels": sorted(names)}
 
 
@@ -340,6 +350,7 @@ async def create_shipment(payload: ShipmentCreate):
     data = payload.model_dump()
     if not (data.get("pod") or "").strip() and client.get("default_pod"):
         data["pod"] = client["default_pod"]
+    data["extra_vessels"] = data.get("extra_vessels") or []
     ship = Shipment(**data)
     ship_dict = ship.model_dump()
     ship_dict["comments"] = _regenerate_comment(ship_dict)
@@ -355,11 +366,57 @@ class VesselStatusPayload(BaseModel):
     date: Optional[str] = None  # YYYY-MM-DD when sailed=True
 
 
+def _ordinal(n: int) -> str:
+    if 10 <= n % 100 <= 20:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
+def _vessel_legs(ship: dict) -> list[dict]:
+    """Assemble every vessel leg (1st, 2nd, 3rd...) into one ordered list.
+    The 1st leg's sob_date is always the shipment's sob_date — the single
+    source of truth for when cargo physically departed, no matter how many
+    transshipment legs follow it."""
+    legs = [{
+        "index": 1,
+        "name": ship.get("vessel_name") or "",
+        "planned_etd": ship.get("planned_etd"),
+        "etd_tba": bool(ship.get("etd_tba")),
+        "sob_date": ship.get("sob_date"),
+        "state": (ship.get("first_vessel_state") or "planned").lower(),
+        "delay_days": ship.get("first_vessel_delay_days"),
+    }]
+    has_second = bool((ship.get("second_vessel_name") or "").strip()) or bool(ship.get("second_vessel_etd")) or bool(ship.get("second_vessel_sob_date"))
+    if has_second:
+        legs.append({
+            "index": 2,
+            "name": ship.get("second_vessel_name") or "",
+            "planned_etd": ship.get("second_vessel_etd"),
+            "etd_tba": False,
+            "sob_date": ship.get("second_vessel_sob_date"),
+            "state": (ship.get("second_vessel_state") or "planned").lower(),
+            "delay_days": ship.get("second_vessel_delay_days"),
+        })
+    for i, ev in enumerate(ship.get("extra_vessels") or []):
+        legs.append({
+            "index": 3 + i,
+            "name": ev.get("name") or "",
+            "planned_etd": ev.get("planned_etd"),
+            "etd_tba": False,
+            "sob_date": ev.get("sob_date"),
+            "state": (ev.get("state") or "planned").lower(),
+            "delay_days": ev.get("delay_days"),
+        })
+    return legs
+
+
 def _regenerate_comment(ship: dict) -> str:
     """Build the shipment comment from state.
     Format:
       - Single vessel:  '{today} - Planned ETD X. Awaiting confirmation of departure.'
-      - Two vessels:    '{today} - Planned ETD X (1st Vessel). Planned ETD Y (2nd Vessel). Awaiting confirmation of departure.'
+      - Multiple legs:  '{today} - 1st Planned ETD X. 2nd Planned ETD Y. Awaiting confirmation of departure.'
       - When a vessel sails, 'Planned ETD X' becomes 'SOB X'.
       - Awaiting clause depends on how far the shipment has progressed and cargo_type.
     """
@@ -375,57 +432,44 @@ def _regenerate_comment(ship: dict) -> str:
         except Exception:
             return iso
 
-    has_second = bool((ship.get("second_vessel_name") or "").strip()) or bool(ship.get("second_vessel_etd")) or bool(ship.get("second_vessel_sob_date"))
-    first_sailed = bool(ship.get("sob_date"))
-    second_sailed = bool(ship.get("second_vessel_sob_date"))
-
+    legs = _vessel_legs(ship)
+    multi = len(legs) > 1
     parts: list[str] = []
+    all_sailed = True
 
-    # First vessel clause
-    first_label = " (1st Vessel)" if has_second else ""
-    first_state = (ship.get("first_vessel_state") or "planned").lower()
-    etd_overdue = False
-    if ship.get("planned_etd"):
-        try:
-            etd_overdue = date.fromisoformat(ship["planned_etd"]) < today
-        except Exception:
-            pass
-    if first_sailed:
-        parts.append(f"SOB {_plain_dd_mm(ship.get('sob_date'))}{first_label}.")
-    elif ship.get("etd_tba") or etd_overdue:
-        # A lapsed ETD never gets shown as-is — the client should never see a date that's
-        # already in the past. Falls back to TBA until a new date (or explicit TBA) is set.
-        parts.append(f"ETD TBA{first_label}.")
-    elif ship.get("planned_etd"):
-        etd_txt = _plain_dd_mm(ship["planned_etd"])
-        if first_state == "delayed":
-            parts.append(f"Vessel delayed slightly. Now planned ETD {etd_txt}{first_label}.")
-        elif first_state == "changed":
-            parts.append(f"Vessel changed by S/Line. Now planned ETD {etd_txt}{first_label}.")
-        else:
-            parts.append(f"Planned ETD {etd_txt}{first_label}.")
-
-    # Second vessel clause
-    if has_second:
-        second_state = (ship.get("second_vessel_state") or "planned").lower()
-        if second_sailed:
-            parts.append(f"SOB {_plain_dd_mm(ship.get('second_vessel_sob_date'))} (2nd Vessel).")
-        elif ship.get("second_vessel_etd"):
-            etd_txt = _plain_dd_mm(ship["second_vessel_etd"])
-            if second_state == "delayed":
-                parts.append(f"Vessel delayed slightly. Now planned ETD {etd_txt} (2nd Vessel).")
-            elif second_state == "changed":
-                parts.append(f"Vessel changed by S/Line. Now planned ETD {etd_txt} (2nd Vessel).")
+    for leg in legs:
+        label = f"{_ordinal(leg['index'])} " if multi else ""
+        sailed = bool(leg["sob_date"])
+        if not sailed:
+            all_sailed = False
+        etd_overdue = False
+        if leg["index"] == 1 and leg.get("planned_etd"):
+            try:
+                etd_overdue = date.fromisoformat(leg["planned_etd"]) < today
+            except Exception:
+                pass
+        if sailed:
+            parts.append(f"{label}SOB {_plain_dd_mm(leg['sob_date'])}.")
+        elif leg["index"] == 1 and (leg.get("etd_tba") or etd_overdue):
+            # A lapsed ETD never gets shown as-is — the client should never see a date
+            # that's already in the past. Falls back to TBA until a new date is set.
+            parts.append(f"{label}ETD TBA.")
+        elif leg.get("planned_etd"):
+            etd_txt = _plain_dd_mm(leg["planned_etd"])
+            if leg["state"] == "delayed":
+                slightly = " slightly" if (leg.get("delay_days") or 0) <= 5 else ""
+                parts.append(f"{label}Vessel delayed{slightly}. Now planned ETD {etd_txt}.")
+            elif leg["state"] == "changed":
+                parts.append(f"{label}Vessel changed by S/Line. Now planned ETD {etd_txt}.")
             else:
-                parts.append(f"Planned ETD {etd_txt} (2nd Vessel).")
+                parts.append(f"{label}Planned ETD {etd_txt}.")
 
     # Awaiting clause
-    all_sailed = first_sailed and (not has_second or second_sailed)
     is_lcl = (ship.get("cargo_type") or "FCL").upper() == "LCL"
     if all_sailed:
         parts.append("Awaiting SOB's." if is_lcl else "Awaiting ANF.")
-    elif first_sailed and has_second:
-        parts.append("Awaiting confirmation of departure of 2nd vessel.")
+    elif legs[0]["sob_date"] and multi:
+        parts.append("Awaiting confirmation of departure of next vessel.")
     else:
         parts.append("Awaiting confirmation of departure.")
 
@@ -446,25 +490,37 @@ def _derive_status(ship: dict) -> str:
 
 @api_router.post("/shipments/{shipment_id}/vessel-status", response_model=Shipment)
 async def set_vessel_status(shipment_id: str, payload: VesselStatusPayload):
+    """vessel is 1-based across the full leg order: 1 = vessel_name, 2 = second_vessel_name,
+    3+ = extra_vessels[vessel-3]. Leg 1's sob_date is always the shipment's canonical SOB date."""
     existing = await db.shipments.find_one({"id": shipment_id}, _proj())
     if not existing:
         raise HTTPException(status_code=404, detail="Shipment not found")
-    if payload.vessel not in (1, 2):
-        raise HTTPException(status_code=400, detail="vessel must be 1 or 2")
-    updates: dict = {}
-    field = "sob_date" if payload.vessel == 1 else "second_vessel_sob_date"
+    if payload.vessel < 1:
+        raise HTTPException(status_code=400, detail="vessel must be >= 1")
+    iso = None
     if payload.sailed:
         iso = _to_iso_or_original(payload.date or "")
         if not iso:
             raise HTTPException(status_code=400, detail="date required when sailed=true")
-        updates[field] = iso
+
+    updates: dict = {}
+    if payload.vessel == 1:
+        updates["sob_date"] = iso
+    elif payload.vessel == 2:
+        updates["second_vessel_sob_date"] = iso
     else:
-        updates[field] = None
+        extra = [dict(ev) for ev in (existing.get("extra_vessels") or [])]
+        idx = payload.vessel - 3
+        if idx < 0 or idx >= len(extra):
+            raise HTTPException(status_code=400, detail="No such vessel leg")
+        extra[idx]["sob_date"] = iso
+        updates["extra_vessels"] = extra
+
     merged = {**existing, **updates}
-    merged["comments"] = _regenerate_comment(merged)
-    merged["status"] = _derive_status(merged)
-    merged["updated_at"] = _now_iso()
-    await db.shipments.update_one({"id": shipment_id}, {"$set": {**updates, "comments": merged["comments"], "status": merged["status"], "updated_at": merged["updated_at"]}})
+    updates["comments"] = _regenerate_comment(merged)
+    updates["status"] = _derive_status(merged)
+    updates["updated_at"] = _now_iso()
+    await db.shipments.update_one({"id": shipment_id}, {"$set": updates})
     doc = await db.shipments.find_one({"id": shipment_id}, _proj())
     return doc
 @api_router.post("/shipments/{shipment_id}/append-comment", response_model=Shipment)
@@ -512,59 +568,6 @@ def _to_iso_or_original(text: str) -> str:
     return text
 
 
-def _auto_delayed_comment(existing: dict, updates: dict) -> tuple[dict, list[str]]:
-    """Detect ETD delay or vessel change; auto-append delayed comment and set status."""
-    appended: list[str] = []
-
-    new_etd = updates.get("planned_etd")
-    old_etd = existing.get("planned_etd")
-    if new_etd and new_etd != old_etd:
-        try:
-            new_d = date.fromisoformat(new_etd)
-            today = date.today()
-            trigger = False
-            if old_etd:
-                old_d = date.fromisoformat(old_etd)
-                if new_d > old_d:
-                    trigger = True
-            elif new_d > today:
-                # First ETD in the future is not a delay — no auto comment
-                trigger = False
-            if trigger:
-                snippet = f"Vessel delayed slightly. Now planned ETD {_fmt_dot_date(new_etd)}"
-                appended.append(snippet)
-                if existing.get("status") != "Shipped":
-                    updates["status"] = "Delayed"
-        except Exception:
-            pass
-
-    new_vessel = updates.get("vessel_name")
-    old_vessel = existing.get("vessel_name")
-    if new_vessel and old_vessel and new_vessel.strip() and new_vessel.strip() != (old_vessel or "").strip():
-        etd_txt = _fmt_dot_date(updates.get("planned_etd") or existing.get("planned_etd") or "")
-        snippet = f"Vessel changed by S/Line to {new_vessel.strip()}. Now planned ETD {etd_txt}".rstrip()
-        appended.append(snippet)
-        if existing.get("status") != "Shipped":
-            updates["status"] = "Delayed"
-
-    new_second = updates.get("second_vessel_name")
-    old_second = existing.get("second_vessel_name")
-    if new_second and new_second.strip() and new_second.strip() != (old_second or "").strip():
-        etd_txt = _fmt_dot_date(updates.get("second_vessel_etd") or existing.get("second_vessel_etd") or "")
-        snippet = f"2nd vessel updated to {new_second.strip()}. Planned ETD {etd_txt}".rstrip()
-        appended.append(snippet)
-
-    if appended:
-        current = (updates.get("comments") if "comments" in updates else existing.get("comments")) or ""
-        current = current.strip()
-        for line in appended:
-            if line and line not in current:
-                current = (current + (". " if current and not current.endswith(".") else " " if current else "") + line).strip()
-        updates["comments"] = current
-
-    return updates, appended
-
-
 @api_router.patch("/shipments/{shipment_id}", response_model=Shipment)
 async def update_shipment(shipment_id: str, payload: ShipmentUpdate):
     existing = await db.shipments.find_one({"id": shipment_id}, _proj())
@@ -581,22 +584,52 @@ async def update_shipment(shipment_id: str, payload: ShipmentUpdate):
     if "anf_received" in updates and not updates["anf_received"]:
         updates["anf_received_at"] = None
 
-    # Detect vessel state transitions (only when a previous value existed — not on initial fill)
+    # Detect vessel state transitions (only when a previous value existed — not on initial fill).
+    # A vessel can be renamed or re-dated at any time, before or after it's sailed — the
+    # shipping line changing schedules/vessels is routine, so editing is never blocked;
+    # this just decides whether the next comment should call out a change or a delay.
     def _later(a, b):
         try:
             return date.fromisoformat(a) > date.fromisoformat(b)
         except Exception:
             return False
 
+    def _delay_days(a, b):
+        try:
+            return (date.fromisoformat(a) - date.fromisoformat(b)).days
+        except Exception:
+            return None
+
     if "vessel_name" in updates and existing.get("vessel_name") and updates["vessel_name"] and updates["vessel_name"].strip() != (existing.get("vessel_name") or "").strip():
         updates["first_vessel_state"] = "changed"
-    elif "planned_etd" in updates and existing.get("planned_etd") and _later(updates["planned_etd"], existing["planned_etd"]):
+        updates["first_vessel_delay_days"] = None
+    elif "planned_etd" in updates and existing.get("planned_etd") and updates.get("planned_etd") and _later(updates["planned_etd"], existing["planned_etd"]):
         updates["first_vessel_state"] = "delayed"
+        updates["first_vessel_delay_days"] = _delay_days(updates["planned_etd"], existing["planned_etd"])
 
     if "second_vessel_name" in updates and existing.get("second_vessel_name") and updates["second_vessel_name"] and updates["second_vessel_name"].strip() != (existing.get("second_vessel_name") or "").strip():
         updates["second_vessel_state"] = "changed"
-    elif "second_vessel_etd" in updates and existing.get("second_vessel_etd") and _later(updates["second_vessel_etd"], existing["second_vessel_etd"]):
+        updates["second_vessel_delay_days"] = None
+    elif "second_vessel_etd" in updates and existing.get("second_vessel_etd") and updates.get("second_vessel_etd") and _later(updates["second_vessel_etd"], existing["second_vessel_etd"]):
         updates["second_vessel_state"] = "delayed"
+        updates["second_vessel_delay_days"] = _delay_days(updates["second_vessel_etd"], existing["second_vessel_etd"])
+
+    if "extra_vessels" in updates:
+        old_extra = existing.get("extra_vessels") or []
+        new_extra = []
+        for i, ev in enumerate(updates["extra_vessels"] or []):
+            ev = dict(ev)
+            old_ev = old_extra[i] if i < len(old_extra) else {}
+            if old_ev.get("name") and ev.get("name") and ev["name"].strip() != (old_ev.get("name") or "").strip():
+                ev["state"] = "changed"
+                ev["delay_days"] = None
+            elif old_ev.get("planned_etd") and ev.get("planned_etd") and _later(ev["planned_etd"], old_ev["planned_etd"]):
+                ev["state"] = "delayed"
+                ev["delay_days"] = _delay_days(ev["planned_etd"], old_ev["planned_etd"])
+            elif "state" not in ev:
+                ev["state"] = old_ev.get("state", "planned")
+            new_extra.append(ev)
+        updates["extra_vessels"] = new_extra
 
     # Auto-regenerate comment + status from state
     merged = {**existing, **updates}
@@ -623,7 +656,7 @@ def _reminder_for_shipment(s: dict, today: date) -> Optional[dict]:
         return None
     cargo = (s.get("cargo_type") or "FCL").upper()
     if cargo == "LCL":
-        target_iso = s.get("planned_eta")
+        target_iso = s.get("eta") or s.get("planned_eta")
         if not target_iso:
             return None
         try:
@@ -721,6 +754,34 @@ async def dashboard_stats():
     async for row in db.shipments.aggregate(pipeline):
         carrier_counts.append({"carrier": row["_id"] or "Other", "count": row["count"]})
 
+    # "Handled" = arrived at POD — counted off the single eta field, regardless of ANF status.
+    today = date.today()
+    week_start = today - timedelta(days=today.weekday())
+    month_start = today.replace(day=1)
+    year_start = today.replace(month=1, day=1)
+    today_iso = today.isoformat()
+
+    async def _arrived_count(start_iso: str) -> int:
+        return await db.shipments.count_documents({"eta": {"$gte": start_iso, "$lte": today_iso}})
+
+    arrived_week = await _arrived_count(week_start.isoformat())
+    arrived_month = await _arrived_count(month_start.isoformat())
+    arrived_year = await _arrived_count(year_start.isoformat())
+
+    by_client_pipeline = [
+        {"$match": {"eta": {"$gte": month_start.isoformat(), "$lte": today_iso}}},
+        {"$group": {"_id": "$client_id", "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+    ]
+    by_client_rows = await db.shipments.aggregate(by_client_pipeline).to_list(200)
+    client_ids = [r["_id"] for r in by_client_rows if r["_id"]]
+    client_docs = await db.clients.find({"id": {"$in": client_ids}}, {"_id": 0, "id": 1, "name": 1}).to_list(200)
+    client_name_map = {c["id"]: c["name"] for c in client_docs}
+    arrived_by_client_month = [
+        {"client_id": r["_id"], "client_name": client_name_map.get(r["_id"], "Unknown"), "count": r["count"]}
+        for r in by_client_rows if r["_id"]
+    ]
+
     return {
         "total_clients": total_clients,
         "active_shipments": active_shipments,
@@ -729,6 +790,10 @@ async def dashboard_stats():
         "shipped": shipped,
         "booked": booked,
         "carriers": carrier_counts,
+        "arrived_week": arrived_week,
+        "arrived_month": arrived_month,
+        "arrived_year": arrived_year,
+        "arrived_by_client_month": arrived_by_client_month,
     }
 
 
@@ -771,14 +836,14 @@ def _columns_for_client(client: dict) -> list[tuple[str, str]]:
 
 def _cell_value(key: str, ship: dict) -> str:
     if key == "vessel_block":
-        vessel = ship.get("vessel_name") or ""
-        doc = ship.get("tracking_doc_number") or ""
-        second = ship.get("second_vessel_name") or ""
+        legs = _vessel_legs(ship)
+        multi = len(legs) > 1
         parts = []
-        if vessel:
-            parts.append(vessel + (" (1st Vessel)" if second else ""))
-        if second:
-            parts.append(second + " (2nd Vessel)")
+        for leg in legs:
+            if leg["name"]:
+                label = f" ({_ordinal(leg['index'])} Vessel)" if multi else ""
+                parts.append(leg["name"] + label)
+        doc = ship.get("tracking_doc_number") or ""
         if doc:
             parts.append(doc)
         return "\n".join(parts)

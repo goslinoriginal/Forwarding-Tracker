@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import { CARRIER_STYLES } from "@/lib/api";
-import { Ship, Users, AlertTriangle, PackageCheck, ArrowRight, BellRing, Check, Search, ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
+import { Ship, Users, AlertTriangle, PackageCheck, ArrowRight, BellRing, Check, Search, ArrowDownToLine, ArrowUpFromLine, CalendarCheck2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -162,16 +162,7 @@ export default function Dashboard() {
   return (
     <div className="px-4 md:px-8 py-6 md:py-8 max-w-[1600px] mx-auto">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
-        <div>
-          <div className="text-xs font-semibold uppercase tracking-wide text-cyan-400/80 mb-1.5">
-            Overview
-          </div>
-          <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-slate-100">Ocean Freight Command</h1>
-          <p className="text-sm text-slate-400 mt-1.5 max-w-2xl">
-            Track FCL &amp; LCL shipments across MSC, Maersk, ONE, COSCO, Hapag Lloyd, PIL, CMA CGM and Vanguard.
-            Generate per-client daily status reports on demand.
-          </p>
-        </div>
+        <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-slate-100">Dashboard</h1>
         <div className="flex gap-2">
           <Link to="/clients">
             <Button variant="outline" className="border-slate-700 hover:bg-slate-800" data-testid="go-clients-button">
@@ -181,11 +172,17 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-8">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mb-4">
         <Stat testid="stat-clients" label="Active clients" value={stats?.total_clients ?? "—"} icon={Users} tone="cyan" />
-        <Stat testid="stat-active" label="Active shipments" value={stats?.active_shipments ?? "—"} icon={Ship} tone="emerald" />
+        <Stat testid="stat-active" label="Current shipments" value={stats?.active_shipments ?? "—"} icon={Ship} tone="emerald" />
         <Stat testid="stat-delayed" label="Delayed" value={stats?.delayed ?? "—"} icon={AlertTriangle} tone="rose" />
         <Stat testid="stat-reminders" label="Cargo reports due" value={reminders.length} icon={BellRing} tone="amber" />
+      </div>
+
+      <div className="grid grid-cols-3 gap-3 md:gap-4 mb-8">
+        <Stat testid="stat-arrived-week" label="Arrived this week" value={stats?.arrived_week ?? "—"} icon={CalendarCheck2} tone="slate" />
+        <Stat testid="stat-arrived-month" label="Arrived this month" value={stats?.arrived_month ?? "—"} icon={CalendarCheck2} tone="slate" />
+        <Stat testid="stat-arrived-year" label="Arrived this year" value={stats?.arrived_year ?? "—"} icon={CalendarCheck2} tone="slate" />
       </div>
 
       {reminders.length > 0 && (
@@ -306,6 +303,9 @@ export default function Dashboard() {
                     <span className={`text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border ${SHIP_STATUS_STYLES[s.status] || SHIP_STATUS_STYLES.Booked}`}>
                       {s.status}
                     </span>
+                    <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-slate-700 text-slate-400">
+                      {s.cargo_type || "FCL"}
+                    </span>
                     {s.supplier && <span className="text-xs text-slate-500 truncate">{s.supplier}</span>}
                   </div>
                   <div className="text-xs text-slate-400 mt-0.5 truncate">
@@ -405,6 +405,33 @@ export default function Dashboard() {
             ))}
           </ul>
         </div>
+      </div>
+
+      <div className="mt-4 md:mt-6 rounded-lg border border-slate-800 bg-slate-900/40 p-5" data-testid="monthly-arrivals-by-client">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">This month</div>
+            <h2 className="text-lg font-semibold text-slate-100">Arrivals by client</h2>
+          </div>
+          <CalendarCheck2 className="h-4 w-4 text-slate-500" />
+        </div>
+        {!stats?.arrived_by_client_month?.length ? (
+          <div className="text-sm text-slate-500 py-8 text-center">No shipments have arrived yet this month.</div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+            {stats.arrived_by_client_month.map((row) => (
+              <Link
+                key={row.client_id}
+                to={`/clients/${row.client_id}`}
+                data-testid={`arrivals-client-${row.client_id}`}
+                className="flex items-center justify-between px-3 py-2 rounded-md border border-slate-800 hover:border-cyan-500/40 hover:bg-slate-900 transition-colors"
+              >
+                <span className="text-sm text-slate-200 truncate">{row.client_name}</span>
+                <span className="font-mono text-sm text-cyan-300 tabular-nums shrink-0 ml-2">{row.count}</span>
+              </Link>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

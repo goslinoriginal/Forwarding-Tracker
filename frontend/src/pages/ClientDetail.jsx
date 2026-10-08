@@ -26,14 +26,14 @@ import {
 import { toast } from "sonner";
 import {
   ArrowLeft, Plus, ExternalLink, FileSpreadsheet, FileText, MessageSquarePlus, PackageCheck,
-  Ship, Trash2, Copy, Anchor, CalendarClock, Sailboat, AlertTriangle, MoreVertical, Pencil, Mail, Sparkles,
+  Ship, Trash2, Copy, Anchor, CalendarClock, Sailboat, AlertTriangle, MoreVertical, Pencil, Mail, Sparkles, X,
 } from "lucide-react";
 
 const emptyShipment = {
   supplier: "", order_booking_file: "", file_number: "", cargo_type: "FCL", status: "Booked",
   sob_date: "", vessel_name: "", tracking_doc_number: "", carrier: "MSC",
-  pol: "", pod: "", eta: "", planned_etd: "", etd_tba: false, planned_eta: "",
-  second_vessel_name: "", second_vessel_etd: "",
+  pol: "", pod: "", eta: "", planned_etd: "", etd_tba: false,
+  second_vessel_name: "", second_vessel_etd: "", second_vessel_sob_date: "", extra_vessels: [],
   final_destination: "", comments: "",
   hbill_released: null, expected_freight_rate: "", copy_docs_status: "",
 };
@@ -45,6 +45,15 @@ function todayISO() {
 
 function isEtdOverdue(s) {
   return !!s.planned_etd && !s.sob_date && !s.etd_tba && s.planned_etd < todayISO();
+}
+
+function shipmentLegs(s) {
+  const legs = [{ num: 1, name: s.vessel_name, sob: s.sob_date }];
+  if ((s.second_vessel_name || "").trim()) legs.push({ num: 2, name: s.second_vessel_name, sob: s.second_vessel_sob_date });
+  (s.extra_vessels || []).forEach((ev, i) => {
+    if ((ev.name || "").trim()) legs.push({ num: 3 + i, name: ev.name, sob: ev.sob_date });
+  });
+  return legs;
 }
 
 const STATUS_STYLES_LOCAL = {
@@ -181,9 +190,9 @@ function VesselCell({ ship }) {
       <div className="font-semibold text-slate-100 text-base truncate">
         {ship.vessel_name || <span className="text-slate-600 italic font-normal">no vessel</span>}
       </div>
-      {ship.second_vessel_name && (
-        <div className="text-sm text-slate-300 truncate">{ship.second_vessel_name}</div>
-      )}
+      {shipmentLegs(ship).slice(1).map((leg) => (
+        <div key={leg.num} className="text-sm text-slate-300 truncate">{leg.name}</div>
+      ))}
       {ship.tracking_doc_number && (
         <div className="mt-1 flex items-center gap-1">
           <button
@@ -197,6 +206,72 @@ function VesselCell({ ship }) {
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function ordinalLabel(n) {
+  if (n % 100 >= 11 && n % 100 <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1: return `${n}st`;
+    case 2: return `${n}nd`;
+    case 3: return `${n}rd`;
+    default: return `${n}th`;
+  }
+}
+
+function OtherVessels({ value, onChange, vessels }) {
+  const legs = useMemo(() => {
+    const list = [];
+    if ((value.second_vessel_name || "").trim() || value.second_vessel_etd || value.second_vessel_sob_date) {
+      list.push({ name: value.second_vessel_name || "", planned_etd: value.second_vessel_etd || "", sob_date: value.second_vessel_sob_date || "" });
+    }
+    (value.extra_vessels || []).forEach((ev) => list.push({ name: ev.name || "", planned_etd: ev.planned_etd || "", sob_date: ev.sob_date || "" }));
+    return list;
+  }, [value.second_vessel_name, value.second_vessel_etd, value.second_vessel_sob_date, value.extra_vessels]);
+
+  const commit = (nextLegs) => {
+    const [second, ...rest] = nextLegs;
+    onChange({
+      second_vessel_name: second?.name || "",
+      second_vessel_etd: second?.planned_etd || "",
+      second_vessel_sob_date: second?.sob_date || "",
+      extra_vessels: rest.map((l) => ({ name: l.name, planned_etd: l.planned_etd || null, sob_date: l.sob_date || null })),
+    });
+  };
+
+  const addLeg = () => commit([...legs, { name: "", planned_etd: "", sob_date: "" }]);
+  const removeLeg = (i) => commit(legs.filter((_, idx) => idx !== i));
+  const updateLeg = (i, patch) => commit(legs.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
+
+  return (
+    <div className="md:col-span-2 space-y-2">
+      {legs.map((leg, i) => (
+        <div key={i} className="flex items-end gap-2 rounded-md border border-slate-800 bg-slate-900/40 p-2.5">
+          <div className="flex-1">
+            <Label className="text-[10px] uppercase tracking-wider font-mono text-slate-500">
+              {ordinalLabel(i + 2)} vessel (transshipment)
+            </Label>
+            <VesselInput value={leg.name} onChange={(v) => updateLeg(i, { name: v })} vessels={vessels} testid={`ship-extra-vessel-${i}`} placeholder="e.g. ONE Eagle" />
+          </div>
+          <div className="w-40">
+            <Label className="text-[10px] uppercase tracking-wider font-mono text-slate-500">Planned ETD</Label>
+            <Input type="date" value={leg.planned_etd || ""} onChange={(e) => updateLeg(i, { planned_etd: e.target.value })} className="mt-1 bg-slate-900 border-slate-800" data-testid={`ship-extra-etd-${i}`} />
+          </div>
+          {leg.sob_date && (
+            <div className="text-xs font-mono text-emerald-300 px-2 py-2 whitespace-nowrap">SOB {leg.sob_date}</div>
+          )}
+          <Button type="button" size="sm" variant="ghost" onClick={() => removeLeg(i)} className="h-9 w-9 p-0 text-slate-500 hover:text-rose-400" data-testid={`ship-remove-vessel-${i}`}>
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      ))}
+      <button
+        type="button" onClick={addLeg} data-testid="ship-add-vessel"
+        className="inline-flex items-center gap-1.5 text-xs font-mono uppercase tracking-wider px-2.5 py-1.5 rounded border border-slate-800 text-slate-400 hover:text-cyan-300 hover:border-cyan-500/30"
+      >
+        <Plus className="h-3.5 w-3.5" /> Add vessel (transshipment)
+      </button>
     </div>
   );
 }
@@ -267,26 +342,17 @@ function ShipmentForm({ value, onChange, showOptional, vessels }) {
           <Input type="date" value={value.planned_etd || ""} onChange={(e) => set({ planned_etd: e.target.value })} className="mt-1 bg-slate-900 border-slate-800" data-testid="ship-planned-etd-input" />
         )}
       </div>
-      <div>
-        <Label className="text-xs uppercase tracking-wider font-mono text-slate-400">2nd Vessel (transhipment)</Label>
-        <VesselInput value={value.second_vessel_name || ""} onChange={(v) => set({ second_vessel_name: v })} vessels={vessels} testid="ship-second-vessel-input" placeholder="Optional" />
-      </div>
-      <div>
-        <Label className="text-xs uppercase tracking-wider font-mono text-slate-400">Planned ETD (2nd vessel)</Label>
-        <Input type="date" value={value.second_vessel_etd || ""} onChange={(e) => set({ second_vessel_etd: e.target.value })} className="mt-1 bg-slate-900 border-slate-800" data-testid="ship-second-etd-input" />
-      </div>
+      <OtherVessels value={value} onChange={set} vessels={vessels} />
       <div>
         <Label className="text-xs uppercase tracking-wider font-mono text-slate-400">Tracking doc # (B/L, Container, Booking)</Label>
         <Input value={value.tracking_doc_number} onChange={(e) => set({ tracking_doc_number: e.target.value })} className="mt-1 bg-slate-900 border-slate-800 font-mono" data-testid="ship-tracking-input" placeholder="MEDU12345678" />
       </div>
-      <div>
-        <Label className="text-xs uppercase tracking-wider font-mono text-slate-400">Planned ETA</Label>
-        <Input type="date" value={value.planned_eta || ""} onChange={(e) => set({ planned_eta: e.target.value })} className="mt-1 bg-slate-900 border-slate-800" data-testid="ship-planned-eta-input" />
-      </div>
       {showOptional.sob_date && (
         <div>
           <Label className="text-xs uppercase tracking-wider font-mono text-slate-400">SOB date / RCG</Label>
-          <Input value={value.sob_date || ""} onChange={(e) => set({ sob_date: e.target.value })} className="mt-1 bg-slate-900 border-slate-800" data-testid="ship-sob-input" placeholder="e.g. 19.08.2026" />
+          <div className="mt-1 h-9 flex items-center px-3 rounded-md border border-slate-800 bg-slate-900/40 text-sm text-slate-400" data-testid="ship-sob-readonly">
+            {value.sob_date || "Auto-set when the 1st vessel is marked sailed"}
+          </div>
         </div>
       )}
       {showOptional.pol && (
@@ -414,8 +480,9 @@ export default function ClientDetail() {
       sob_date: s.sob_date || "", vessel_name: s.vessel_name || "",
       tracking_doc_number: s.tracking_doc_number || "", carrier: s.carrier || "Other",
       pol: s.pol || "", pod: s.pod || "", eta: s.eta || "",
-      planned_etd: s.planned_etd || "", etd_tba: !!s.etd_tba, planned_eta: s.planned_eta || "",
+      planned_etd: s.planned_etd || "", etd_tba: !!s.etd_tba,
       second_vessel_name: s.second_vessel_name || "", second_vessel_etd: s.second_vessel_etd || "",
+      second_vessel_sob_date: s.second_vessel_sob_date || "", extra_vessels: s.extra_vessels || [],
       final_destination: s.final_destination || "", comments: s.comments || "",
       hbill_released: s.hbill_released ?? null,
       expected_freight_rate: s.expected_freight_rate || "",
@@ -437,7 +504,7 @@ export default function ClientDetail() {
   const setVesselSailed = async (s, vesselNum, isoDate) => {
     try {
       await api.post(`/shipments/${s.id}/vessel-status`, { vessel: vesselNum, sailed: true, date: isoDate });
-      toast.success(`${vesselNum === 1 ? "1st" : "2nd"} vessel marked as sailed`);
+      toast.success(`${ordinalLabel(vesselNum)} vessel marked as sailed`);
       load();
     } catch { toast.error("Failed to mark sailed"); }
   };
@@ -445,7 +512,7 @@ export default function ClientDetail() {
   const setVesselUnsailed = async (s, vesselNum) => {
     try {
       await api.post(`/shipments/${s.id}/vessel-status`, { vessel: vesselNum, sailed: false });
-      toast.success(`${vesselNum === 1 ? "1st" : "2nd"} vessel unmarked`);
+      toast.success(`${ordinalLabel(vesselNum)} vessel unmarked`);
       load();
     } catch { toast.error("Failed to unmark"); }
   };
@@ -645,25 +712,28 @@ export default function ClientDetail() {
                     )}
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
-                    {!overdue && (
-                      s.sob_date ? (
+                    {shipmentLegs(s).map((leg) => {
+                      if (leg.num === 1 && overdue) return null; // the overdue banner above already offers this action
+                      return leg.sob ? (
                         <button
-                          onClick={() => setVesselUnsailed(s, 1)}
-                          data-testid={`unmark-first-sailed-${s.id}`}
-                          title="Unmark 1st vessel as sailed"
+                          key={leg.num}
+                          onClick={() => setVesselUnsailed(s, leg.num)}
+                          data-testid={`unmark-sailed-${leg.num}-${s.id}`}
+                          title={`${ordinalLabel(leg.num)} vessel confirmed sailed — click to unmark`}
                           className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded border text-xs font-mono uppercase tracking-wider bg-emerald-500/20 border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/30"
                         >
-                          <Sailboat className="h-3.5 w-3.5" /> 1st SOB
+                          <Sailboat className="h-3.5 w-3.5" /> {ordinalLabel(leg.num)} SOB ✓
                         </button>
                       ) : (
                         <DatePickerButton
-                          label="1st Sailed" icon={Sailboat} tone="emerald"
-                          onPick={(iso) => setVesselSailed(s, 1, iso)}
-                          testid={`mark-first-sailed-${s.id}`}
+                          key={leg.num}
+                          label={`Mark ${ordinalLabel(leg.num)} sailed`} icon={Sailboat} tone="emerald"
+                          onPick={(iso) => setVesselSailed(s, leg.num, iso)}
+                          testid={`mark-sailed-${leg.num}-${s.id}`}
                           disabled={s.anf_received}
                         />
-                      )
-                    )}
+                      );
+                    })}
                     {s.etd_tba && !overdue && !s.sob_date && !s.anf_received && (
                       <DatePickerButton
                         label="Set ETD" icon={CalendarClock} tone="amber"
@@ -671,25 +741,6 @@ export default function ClientDetail() {
                         testid={`set-etd-from-tba-${s.id}`}
                       />
                     )}
-                    {s.second_vessel_name ? (
-                      s.second_vessel_sob_date ? (
-                        <button
-                          onClick={() => setVesselUnsailed(s, 2)}
-                          data-testid={`unmark-second-sailed-${s.id}`}
-                          title="Unmark 2nd vessel as sailed"
-                          className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded border text-xs font-mono uppercase tracking-wider bg-emerald-500/20 border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/30"
-                        >
-                          <Sailboat className="h-3.5 w-3.5" /> 2nd SOB
-                        </button>
-                      ) : (
-                        <DatePickerButton
-                          label="2nd Sailed" icon={Sailboat} tone="emerald"
-                          onPick={(iso) => setVesselSailed(s, 2, iso)}
-                          testid={`mark-second-sailed-${s.id}`}
-                          disabled={s.anf_received}
-                        />
-                      )
-                    ) : null}
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-slate-400 hover:text-slate-200" data-testid={`shipment-menu-${s.id}`}>
