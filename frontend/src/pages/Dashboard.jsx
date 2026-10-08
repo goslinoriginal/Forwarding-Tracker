@@ -1,10 +1,54 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import { CARRIER_STYLES } from "@/lib/api";
-import { Ship, Users, AlertTriangle, PackageCheck, Clock, ArrowRight, BellRing, Check } from "lucide-react";
+import { Ship, Users, AlertTriangle, PackageCheck, ArrowRight, BellRing, Check, Search, ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import { toast } from "sonner";
+
+const SHIP_STATUS_STYLES = {
+  Planned: "bg-slate-500/10 text-slate-300 border-slate-500/30",
+  Booked: "bg-amber-500/10 text-amber-300 border-amber-500/30",
+  Shipped: "bg-emerald-500/10 text-emerald-300 border-emerald-500/30",
+};
+
+const SHIP_SORT_OPTIONS = [
+  { value: "arrival_asc", label: "Arriving soonest" },
+  { value: "departure_asc", label: "Departing soonest" },
+  { value: "arrival_desc", label: "Arriving latest" },
+  { value: "departure_desc", label: "Departing latest" },
+  { value: "client_az", label: "Client (A–Z)" },
+  { value: "client_za", label: "Client (Z–A)" },
+];
+
+function daysUntil(iso) {
+  if (!iso) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const d = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return null;
+  return Math.round((d - today) / 86400000);
+}
+
+function dayLabel(days) {
+  if (days === null || days === undefined) return "—";
+  if (days < 0) return `${Math.abs(days)}d ago`;
+  if (days === 0) return "today";
+  return `in ${days}d`;
+}
+
+function compareDays(a, b, dir) {
+  const infA = a === null || a === undefined;
+  const infB = b === null || b === undefined;
+  if (infA && infB) return 0;
+  if (infA) return 1;
+  if (infB) return -1;
+  return dir === "asc" ? a - b : b - a;
+}
 
 function Stat({ label, value, icon: Icon, tone = "cyan", testid }) {
   const tones = {
@@ -33,18 +77,25 @@ export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [clients, setClients] = useState([]);
   const [reminders, setReminders] = useState([]);
+  const [shipments, setShipments] = useState([]);
+  const [shipSearch, setShipSearch] = useState("");
+  const [shipCompany, setShipCompany] = useState("all");
+  const [shipStatus, setShipStatus] = useState("all");
+  const [shipSort, setShipSort] = useState("arrival_asc");
 
   useEffect(() => {
     (async () => {
       try {
-        const [s, c, r] = await Promise.all([
+        const [s, c, r, sh] = await Promise.all([
           api.get("/dashboard/stats"),
           api.get("/clients"),
           api.get("/dashboard/reminders"),
+          api.get("/shipments", { params: { include_anf: false } }),
         ]);
         setStats(s.data);
         setClients(c.data);
         setReminders(r.data?.reminders || []);
+        setShipments(sh.data || []);
       } catch (e) {
         console.error(e);
       }
@@ -52,6 +103,51 @@ export default function Dashboard() {
   }, []);
 
   const maxCarrier = Math.max(1, ...(stats?.carriers?.map((c) => c.count) || [1]));
+
+  const clientLookup = useMemo(() => {
+    const m = {};
+    clients.forEach((c) => { m[c.id] = c; });
+    return m;
+  }, [clients]);
+
+  const enrichedShipments = useMemo(() => {
+    return shipments.map((s) => {
+      const client = clientLookup[s.client_id];
+      const arrivalIso = s.eta || s.planned_eta || null;
+      const departureIso = s.sob_date || (s.etd_tba ? null : s.planned_etd) || null;
+      return {
+        ...s,
+        client_name: client?.name || "—",
+        client_company: client?.company || "Patuma",
+        arrival_iso: arrivalIso,
+        departure_iso: departureIso,
+        arrival_days: daysUntil(arrivalIso),
+        departure_days: daysUntil(departureIso),
+      };
+    });
+  }, [shipments, clientLookup]);
+
+  const visibleShipments = useMemo(() => {
+    const q = shipSearch.trim().toLowerCase();
+    let list = enrichedShipments.filter((s) => {
+      if (shipCompany !== "all" && s.client_company !== shipCompany) return false;
+      if (shipStatus !== "all" && s.status !== shipStatus) return false;
+      if (q) {
+        const hay = `${s.client_name} ${s.supplier} ${s.vessel_name} ${s.second_vessel_name || ""}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+    const sorters = {
+      arrival_asc: (a, b) => compareDays(a.arrival_days, b.arrival_days, "asc") || a.client_name.localeCompare(b.client_name),
+      arrival_desc: (a, b) => compareDays(a.arrival_days, b.arrival_days, "desc") || a.client_name.localeCompare(b.client_name),
+      departure_asc: (a, b) => compareDays(a.departure_days, b.departure_days, "asc") || a.client_name.localeCompare(b.client_name),
+      departure_desc: (a, b) => compareDays(a.departure_days, b.departure_days, "desc") || a.client_name.localeCompare(b.client_name),
+      client_az: (a, b) => a.client_name.localeCompare(b.client_name) || compareDays(a.arrival_days, b.arrival_days, "asc"),
+      client_za: (a, b) => b.client_name.localeCompare(a.client_name) || compareDays(a.arrival_days, b.arrival_days, "asc"),
+    };
+    return [...list].sort(sorters[shipSort] || sorters.arrival_asc);
+  }, [enrichedShipments, shipCompany, shipStatus, shipSearch, shipSort]);
 
   const ackReport = async (shipmentId) => {
     try {
@@ -131,6 +227,114 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      <div className="mb-6 rounded-lg border border-slate-800 bg-slate-900/40 p-5" data-testid="all-shipments-panel">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">Shipments</div>
+            <h2 className="text-lg font-semibold text-slate-100">All shipments — arrivals &amp; departures</h2>
+          </div>
+          <Ship className="h-4 w-4 text-slate-500" />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          <div className="relative">
+            <Search className="h-3.5 w-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+            <Input
+              value={shipSearch}
+              onChange={(e) => setShipSearch(e.target.value)}
+              placeholder="Search client, supplier, vessel…"
+              data-testid="ship-search-input"
+              className="h-9 pl-8 w-56 bg-slate-900 border-slate-800 text-xs"
+            />
+          </div>
+          <div className="flex items-center gap-0.5 rounded-md border border-slate-800 bg-slate-900/60 p-0.5">
+            {["all", "Clearfreight", "Patuma"].map((opt) => (
+              <button
+                key={opt}
+                onClick={() => setShipCompany(opt)}
+                data-testid={`ship-filter-company-${opt.toLowerCase()}`}
+                className={`px-3 py-1.5 text-xs font-medium rounded ${shipCompany === opt ? "bg-cyan-500/15 text-cyan-300" : "text-slate-400 hover:text-slate-200"}`}
+              >
+                {opt === "all" ? "All" : opt}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-0.5 rounded-md border border-slate-800 bg-slate-900/60 p-0.5">
+            {["all", "Planned", "Booked", "Shipped"].map((opt) => (
+              <button
+                key={opt}
+                onClick={() => setShipStatus(opt)}
+                data-testid={`ship-filter-status-${opt.toLowerCase()}`}
+                className={`px-3 py-1.5 text-xs font-medium rounded ${shipStatus === opt ? "bg-cyan-500/15 text-cyan-300" : "text-slate-400 hover:text-slate-200"}`}
+              >
+                {opt === "all" ? "All" : opt}
+              </button>
+            ))}
+          </div>
+          <div className="sm:ml-auto">
+            <Select value={shipSort} onValueChange={setShipSort}>
+              <SelectTrigger className="w-48 h-9 bg-slate-900 border-slate-800 text-xs" data-testid="ship-sort-select"><SelectValue /></SelectTrigger>
+              <SelectContent className="bg-slate-900 border-slate-800">
+                {SHIP_SORT_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        {visibleShipments.length === 0 ? (
+          <div className="text-sm text-slate-500 py-8 text-center">
+            {shipments.length === 0 ? "No active shipments yet." : "No shipments match these filters."}
+          </div>
+        ) : (
+          <div className="max-h-[520px] overflow-y-auto divide-y divide-slate-800/80 -mx-1">
+            {visibleShipments.map((s) => (
+              <Link
+                key={s.id}
+                to={`/clients/${s.client_id}`}
+                data-testid={`all-ship-${s.id}`}
+                className="flex items-center gap-3 py-2.5 px-1 hover:bg-slate-900/60 transition-colors rounded-md"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-semibold text-slate-100 truncate">{s.client_name}</span>
+                    <span className={`text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border ${SHIP_STATUS_STYLES[s.status] || SHIP_STATUS_STYLES.Booked}`}>
+                      {s.status}
+                    </span>
+                    {s.supplier && <span className="text-xs text-slate-500 truncate">{s.supplier}</span>}
+                  </div>
+                  <div className="text-xs text-slate-400 mt-0.5 truncate">
+                    {s.vessel_name || <span className="italic text-slate-600">No vessel</span>}
+                    {s.second_vessel_name && ` → ${s.second_vessel_name}`}
+                  </div>
+                </div>
+                <div className="hidden md:flex items-center gap-5 shrink-0 text-right">
+                  <div className="w-24">
+                    <div className="text-[9px] font-mono uppercase tracking-widest text-slate-500 flex items-center justify-end gap-1">
+                      <ArrowUpFromLine className="h-2.5 w-2.5" /> Departs
+                    </div>
+                    <div className={`text-xs font-mono mt-0.5 ${s.sob_date ? "text-emerald-300" : "text-slate-300"}`}>
+                      {s.departure_iso || (s.etd_tba ? "TBA" : "—")}
+                    </div>
+                  </div>
+                  <div className="w-24">
+                    <div className="text-[9px] font-mono uppercase tracking-widest text-slate-500 flex items-center justify-end gap-1">
+                      <ArrowDownToLine className="h-2.5 w-2.5" /> Arrives
+                    </div>
+                    <div className="text-xs font-mono mt-0.5 text-slate-200">{s.arrival_iso || "—"}</div>
+                    {s.arrival_iso && (
+                      <div className={`text-[10px] mt-0.5 ${s.arrival_days < 0 ? "text-rose-300" : s.arrival_days <= 3 ? "text-amber-300" : "text-slate-500"}`}>
+                        {dayLabel(s.arrival_days)}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <ArrowRight className="h-4 w-4 text-slate-600 shrink-0" />
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
         {/* Carrier distribution */}
