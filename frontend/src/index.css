@@ -17,26 +17,26 @@ code, .font-mono {
 
 @layer base {
   :root {
-    /* Light theme — "Frosted aura" palette (#5C7E8F / #A2A2A2 / #D4DDE2 / #FFFFFF) */
-    --background: 201 19% 86%;
-    --foreground: 200 22% 15%;
+    /* Light theme — clean neutral surfaces + the real Clearfreight/Patuma logo blue (#2E63C8) as accent */
+    --background: 216 33% 97%;
+    --foreground: 220 43% 11%;
     --card: 0 0% 100%;
-    --card-foreground: 200 22% 15%;
+    --card-foreground: 220 43% 11%;
     --popover: 0 0% 100%;
-    --popover-foreground: 200 22% 15%;
-    --primary: 200 22% 46%;
+    --popover-foreground: 220 43% 11%;
+    --primary: 219 63% 48%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 201 25% 93%;
-    --secondary-foreground: 200 22% 15%;
-    --muted: 201 20% 92%;
-    --muted-foreground: 0 0% 45%;
-    --accent: 201 19% 90%;
-    --accent-foreground: 200 22% 15%;
+    --secondary: 213 36% 95%;
+    --secondary-foreground: 220 43% 11%;
+    --muted: 213 30% 94%;
+    --muted-foreground: 212 16% 42%;
+    --accent: 213 30% 93%;
+    --accent-foreground: 220 43% 11%;
     --destructive: 0 84% 60%;
     --destructive-foreground: 210 40% 98%;
-    --border: 0 0% 82%;
-    --input: 0 0% 82%;
-    --ring: 200 22% 46%;
+    --border: 212 24% 89%;
+    --input: 212 24% 89%;
+    --ring: 219 63% 48%;
     --radius: 0.5rem;
   }
 
@@ -67,7 +67,7 @@ code, .font-mono {
 @layer base {
   * { @apply border-border; }
   body { @apply bg-slate-950 text-slate-200; }
-  html.light body { background-color: rgb(212 221 226); color: rgb(30 41 47); }
+  html.light body { background-color: rgb(245 247 250); color: rgb(16 24 40); }
 }
 
 /* Custom scrollbar */
@@ -75,33 +75,49 @@ code, .font-mono {
 ::-webkit-scrollbar-track { background: rgb(2, 6, 23); }
 ::-webkit-scrollbar-thumb { background: rgb(30, 41, 59); border-radius: 4px; }
 ::-webkit-scrollbar-thumb:hover { background: rgb(51, 65, 85); }
-html.light ::-webkit-scrollbar-track { background: rgb(228, 233, 236); }
-html.light ::-webkit-scrollbar-thumb { background: rgb(162, 162, 162); }
-html.light ::-webkit-scrollbar-thumb:hover { background: rgb(130, 130, 130); }
+html.light ::-webkit-scrollbar-track { background: rgb(231, 237, 243); }
+html.light ::-webkit-scrollbar-thumb { background: rgb(185, 196, 208); }
+html.light ::-webkit-scrollbar-thumb:hover { background: rgb(148, 163, 184); }
 
-/* Light-mode color remap for hardcoded slate classes across the app — "Frosted aura" palette */
+/* Light-mode color remap for hardcoded slate classes across the app */
 html.light body .bg-slate-950,
-html.light body .bg-slate-950\/95 { background-color: rgb(212 221 226) !important; }
+html.light body .bg-slate-950\/95 { background-color: rgb(245 247 250) !important; }
 html.light body .bg-slate-900,
 html.light body .bg-slate-900\/40,
 html.light body .bg-slate-900\/60,
 html.light body .bg-slate-900\/30 { background-color: rgb(255 255 255) !important; }
-html.light body .bg-slate-900\/90 { background-color: rgb(245 248 250) !important; }
+html.light body .bg-slate-900\/90 { background-color: rgb(248 250 252) !important; }
 html.light body .bg-slate-800,
-html.light body .bg-slate-800\/40 { background-color: rgb(212 221 226) !important; }
-html.light body .border-slate-900 { border-color: rgb(196 205 210) !important; }
-html.light body .border-slate-800 { border-color: rgb(180 190 196) !important; }
+html.light body .bg-slate-800\/40 { background-color: rgb(238 242 247) !important; }
+html.light body .border-slate-900 { border-color: rgb(221 227 234) !important; }
+html.light body .border-slate-800 { border-color: rgb(206 214 223) !important; }
 html.light body .text-slate-100,
 html.light body .text-slate-200,
-html.light body .text-slate-300 { color: rgb(30 41 47) !important; }
-html.light body .text-slate-400 { color: rgb(110 110 110) !important; }
-html.light body .text-slate-500 { color: rgb(130 130 130) !important; }
-html.light body .text-slate-600 { color: rgb(162 162 162) !important; }
+html.light body .text-slate-300 { color: rgb(16 24 40) !important; }
+html.light body .text-slate-400 { color: rgb(91 107 125) !important; }
+html.light body .text-slate-500 { color: rgb(124 140 160) !important; }
+html.light body .text-slate-600 { color: rgb(154 167 181) !important; }
 html.light body .hover\:bg-slate-900:hover,
-html.light body .hover\:bg-slate-800:hover { background-color: rgb(220 227 231) !important; }
+html.light body .hover\:bg-slate-800:hover { background-color: rgb(231 237 243) !important; }
 html.light body .hover\:text-slate-100:hover,
-html.light body .hover\:text-slate-200:hover { color: rgb(30 41 47) !important; }
-html.light body ::selection { background: rgb(92, 126, 143); color: white; }
+html.light body .hover\:text-slate-200:hover { color: rgb(16 24 40) !important; }
+html.light body ::selection { background: rgb(46, 99, 200); color: white; }
+
+/* Light-mode brand-blue remap for the app's cyan "Ocean OPS" accent — recolors it to the
+   real logo blue (#2E63C8) and fixes contrast on badges/links/buttons against light surfaces.
+   Dark mode is untouched; it keeps its original cyan accent. */
+html.light body [class*="text-slate-950"] { color: rgb(255 255 255) !important; }
+html.light body [class*="bg-cyan-500/10"] { background-color: rgba(46, 99, 200, 0.1) !important; }
+html.light body [class*="bg-cyan-500/15"] { background-color: rgba(46, 99, 200, 0.15) !important; }
+html.light body [class*="border-cyan-500/25"] { border-color: rgba(46, 99, 200, 0.3) !important; }
+html.light body [class*="border-cyan-500/30"] { border-color: rgba(46, 99, 200, 0.35) !important; }
+html.light body [class*="border-cyan-500/40"]:hover { border-color: rgba(46, 99, 200, 0.55) !important; }
+html.light body [class*="bg-cyan-500 "] { background-color: rgb(46, 99, 200) !important; }
+html.light body [class*="hover:bg-cyan-400"]:hover { background-color: rgb(90, 144, 220) !important; }
+html.light body [class*="text-cyan-500"] { color: rgb(46, 99, 200) !important; }
+html.light body [class*="text-cyan-400"] { color: rgb(36, 79, 160) !important; }
+html.light body [class*="text-cyan-300"] { color: rgb(28, 62, 125) !important; }
+html.light body [class*="text-cyan-200"] { color: rgb(28, 62, 125) !important; }
 
 /* Stronger borders in dark mode for key surfaces */
 html.dark .data-table th,
