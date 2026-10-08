@@ -56,7 +56,7 @@ const STATUS_STYLES_LOCAL = {
 
 function StatusBadge({ status }) {
   return (
-    <span className={`text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border ${STATUS_STYLES_LOCAL[status] || STATUS_STYLES_LOCAL.Booked}`}>
+    <span className={`text-xs font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border ${STATUS_STYLES_LOCAL[status] || STATUS_STYLES_LOCAL.Booked}`}>
       {status}
     </span>
   );
@@ -66,8 +66,8 @@ function Field({ label, children, className = "" }) {
   if (children === null || children === undefined || children === "") return null;
   return (
     <div className={`min-w-[88px] ${className}`}>
-      <div className="text-[9px] font-mono uppercase tracking-widest text-slate-500">{label}</div>
-      <div className="text-sm text-slate-200 mt-0.5 break-words leading-snug">{children}</div>
+      <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500">{label}</div>
+      <div className="text-base text-slate-200 mt-0.5 break-words leading-snug">{children}</div>
     </div>
   );
 }
@@ -103,9 +103,9 @@ function DatePickerButton({ label, icon: Icon, tone, onPick, testid, disabled })
           disabled={disabled}
           data-testid={testid}
           title={label}
-          className={`inline-flex items-center gap-1 h-7 px-2 rounded border text-[10px] font-mono uppercase tracking-wider transition-colors ${tones[tone]} ${disabled ? "opacity-40 cursor-not-allowed" : ""}`}
+          className={`inline-flex items-center gap-1.5 h-8 px-2.5 rounded border text-xs font-mono uppercase tracking-wider transition-colors ${tones[tone]} ${disabled ? "opacity-40 cursor-not-allowed" : ""}`}
         >
-          <Icon className="h-3 w-3" />
+          <Icon className="h-3.5 w-3.5" />
           {label}
         </button>
       </PopoverTrigger>
@@ -177,22 +177,22 @@ function VesselCell({ ship }) {
   };
   return (
     <div className="leading-tight">
-      <div className="font-semibold text-slate-100 text-xs truncate">
+      <div className="font-semibold text-slate-100 text-base truncate">
         {ship.vessel_name || <span className="text-slate-600 italic font-normal">no vessel</span>}
       </div>
       {ship.second_vessel_name && (
-        <div className="text-[11px] text-slate-300 truncate">{ship.second_vessel_name}</div>
+        <div className="text-sm text-slate-300 truncate">{ship.second_vessel_name}</div>
       )}
       {ship.tracking_doc_number && (
-        <div className="mt-0.5 flex items-center gap-1">
+        <div className="mt-1 flex items-center gap-1">
           <button
             onClick={openCarrier}
             data-testid={`track-trace-link-${ship.id}`}
             title={`Open ${ship.carrier} tracking & copy number`}
-            className="font-mono text-[10px] font-semibold px-1 py-0.5 rounded bg-slate-800 text-cyan-300 border border-cyan-500/30 hover:bg-cyan-500/10 inline-flex items-center gap-1 truncate max-w-[110px]"
+            className="font-mono text-xs font-semibold px-1.5 py-0.5 rounded bg-slate-800 text-cyan-300 border border-cyan-500/30 hover:bg-cyan-500/10 inline-flex items-center gap-1 truncate max-w-[140px]"
           >
             <span className="truncate">{ship.tracking_doc_number}</span>
-            <ExternalLink className="h-2.5 w-2.5 shrink-0" />
+            <ExternalLink className="h-3 w-3 shrink-0" />
           </button>
         </div>
       )}
@@ -583,7 +583,7 @@ export default function ClientDetail() {
                 data-testid={`shipment-row-${s.id}`}
               >
                 {overdue && (
-                  <div className="mb-3 flex flex-wrap items-center gap-2.5 px-3 py-2 rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-200 text-xs" data-testid={`etd-overdue-${s.id}`}>
+                  <div className="mb-3 flex flex-wrap items-center gap-2.5 px-3 py-2 rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-200 text-sm" data-testid={`etd-overdue-${s.id}`}>
                     <AlertTriangle className="h-4 w-4 shrink-0" />
                     <span className="font-medium">Planned ETD {s.planned_etd} has passed — did it sail?</span>
                     <div className="ml-auto flex flex-wrap gap-1.5">
@@ -592,7 +592,7 @@ export default function ClientDetail() {
                       <button
                         onClick={() => patchShip(s.id, { etd_tba: true })}
                         data-testid={`mark-etd-tba-${s.id}`}
-                        className="inline-flex items-center h-7 px-2 rounded border text-[10px] font-mono uppercase tracking-wider text-amber-300 hover:bg-amber-500/10 border-amber-500/30"
+                        className="inline-flex items-center h-8 px-2.5 rounded border text-xs font-mono uppercase tracking-wider text-amber-300 hover:bg-amber-500/10 border-amber-500/30"
                       >
                         Mark TBA
                       </button>
@@ -602,12 +602,12 @@ export default function ClientDetail() {
 
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex items-center gap-2 flex-wrap">
-                    <h3 className="font-semibold text-slate-100 text-base truncate" data-testid={`shipment-supplier-${s.id}`}>
+                    <h3 className="font-semibold text-slate-100 text-lg truncate" data-testid={`shipment-supplier-${s.id}`}>
                       {s.supplier || "Unnamed supplier"}
                     </h3>
                     <StatusBadge status={s.status} />
                     {s.anf_received && (
-                      <span className="text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-300 border border-purple-500/40">ANF received</span>
+                      <span className="text-xs font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-300 border border-purple-500/40">ANF received</span>
                     )}
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
@@ -617,9 +617,9 @@ export default function ClientDetail() {
                           onClick={() => setVesselUnsailed(s, 1)}
                           data-testid={`unmark-first-sailed-${s.id}`}
                           title="Unmark 1st vessel as sailed"
-                          className="inline-flex items-center gap-1 h-7 px-2 rounded border text-[10px] font-mono uppercase tracking-wider bg-emerald-500/20 border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/30"
+                          className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded border text-xs font-mono uppercase tracking-wider bg-emerald-500/20 border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/30"
                         >
-                          <Sailboat className="h-3 w-3" /> 1st SOB
+                          <Sailboat className="h-3.5 w-3.5" /> 1st SOB
                         </button>
                       ) : (
                         <DatePickerButton
@@ -643,9 +643,9 @@ export default function ClientDetail() {
                           onClick={() => setVesselUnsailed(s, 2)}
                           data-testid={`unmark-second-sailed-${s.id}`}
                           title="Unmark 2nd vessel as sailed"
-                          className="inline-flex items-center gap-1 h-7 px-2 rounded border text-[10px] font-mono uppercase tracking-wider bg-emerald-500/20 border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/30"
+                          className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded border text-xs font-mono uppercase tracking-wider bg-emerald-500/20 border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/30"
                         >
-                          <Sailboat className="h-3 w-3" /> 2nd SOB
+                          <Sailboat className="h-3.5 w-3.5" /> 2nd SOB
                         </button>
                       ) : (
                         <DatePickerButton
@@ -658,24 +658,24 @@ export default function ClientDetail() {
                     ) : null}
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-slate-400 hover:text-slate-200" data-testid={`shipment-menu-${s.id}`}>
-                          <MoreVertical className="h-4 w-4" />
+                        <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-slate-400 hover:text-slate-200" data-testid={`shipment-menu-${s.id}`}>
+                          <MoreVertical className="h-5 w-5" />
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="bg-slate-950 border-slate-800 w-48">
-                        <DropdownMenuItem onClick={() => startEdit(s)} data-testid={`edit-shipment-${s.id}`} className="text-slate-200 focus:bg-slate-800 focus:text-slate-100 cursor-pointer">
-                          <Pencil className="h-3.5 w-3.5 mr-2" /> Edit
+                        <DropdownMenuItem onClick={() => startEdit(s)} data-testid={`edit-shipment-${s.id}`} className="text-sm text-slate-200 focus:bg-slate-800 focus:text-slate-100 cursor-pointer">
+                          <Pencil className="h-4 w-4 mr-2" /> Edit
                         </DropdownMenuItem>
                         {!s.anf_received && (
-                          <DropdownMenuItem onClick={() => markAnf(s)} data-testid={`mark-anf-${s.id}`} className="text-purple-300 focus:bg-purple-500/10 focus:text-purple-200 cursor-pointer">
-                            <PackageCheck className="h-3.5 w-3.5 mr-2" /> Mark ANF received
+                          <DropdownMenuItem onClick={() => markAnf(s)} data-testid={`mark-anf-${s.id}`} className="text-sm text-purple-300 focus:bg-purple-500/10 focus:text-purple-200 cursor-pointer">
+                            <PackageCheck className="h-4 w-4 mr-2" /> Mark ANF received
                           </DropdownMenuItem>
                         )}
                         <DropdownMenuSeparator className="bg-slate-800" />
                         <AlertDialog>
                           <AlertDialogTrigger asChild>
-                            <DropdownMenuItem onSelect={(e) => e.preventDefault()} data-testid={`delete-shipment-${s.id}`} className="text-rose-400 focus:bg-rose-500/10 focus:text-rose-300 cursor-pointer">
-                              <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
+                            <DropdownMenuItem onSelect={(e) => e.preventDefault()} data-testid={`delete-shipment-${s.id}`} className="text-sm text-rose-400 focus:bg-rose-500/10 focus:text-rose-300 cursor-pointer">
+                              <Trash2 className="h-4 w-4 mr-2" /> Delete
                             </DropdownMenuItem>
                           </AlertDialogTrigger>
                           <AlertDialogContent className="bg-slate-950 border-slate-800">
@@ -695,7 +695,7 @@ export default function ClientDetail() {
                 </div>
 
                 {s.order_booking_file && (
-                  <div className="mt-1 text-xs text-slate-400 whitespace-pre-wrap leading-snug">{s.order_booking_file}</div>
+                  <div className="mt-1 text-sm text-slate-400 whitespace-pre-wrap leading-snug">{s.order_booking_file}</div>
                 )}
 
                 <div className="mt-2.5 flex flex-wrap gap-x-7 gap-y-2">
@@ -729,7 +729,7 @@ export default function ClientDetail() {
                   )}
                 </div>
 
-                <div className="mt-2.5 text-sm text-slate-300 bg-slate-950/50 border border-slate-800/80 rounded-md px-3 py-1.5 leading-snug" data-testid={`comments-view-${s.id}`}>
+                <div className="mt-2.5 text-base text-slate-300 bg-slate-950/50 border border-slate-800/80 rounded-md px-3 py-2 leading-snug" data-testid={`comments-view-${s.id}`}>
                   {s.comments || <span className="text-slate-600 italic">Auto-generated from vessel status</span>}
                 </div>
               </div>
