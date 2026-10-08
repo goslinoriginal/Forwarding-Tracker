@@ -79,34 +79,40 @@ html.light ::-webkit-scrollbar-track { background: rgb(231, 237, 243); }
 html.light ::-webkit-scrollbar-thumb { background: rgb(185, 196, 208); }
 html.light ::-webkit-scrollbar-thumb:hover { background: rgb(148, 163, 184); }
 
-/* Light-mode color remap for hardcoded slate classes across the app */
-html.light body .bg-slate-950,
-html.light body .bg-slate-950\/95 { background-color: rgb(245 247 250) !important; }
-html.light body .bg-slate-900,
-html.light body .bg-slate-900\/40,
-html.light body .bg-slate-900\/60,
-html.light body .bg-slate-900\/30 { background-color: rgb(255 255 255) !important; }
-html.light body .bg-slate-900\/90 { background-color: rgb(248 250 252) !important; }
-html.light body .bg-slate-800,
-html.light body .bg-slate-800\/40 { background-color: rgb(238 242 247) !important; }
-html.light body .border-slate-900 { border-color: rgb(221 227 234) !important; }
-html.light body .border-slate-800 { border-color: rgb(206 214 223) !important; }
-html.light body .text-slate-100,
-html.light body .text-slate-200,
-html.light body .text-slate-300 { color: rgb(16 24 40) !important; }
-html.light body .text-slate-400 { color: rgb(91 107 125) !important; }
-html.light body .text-slate-500 { color: rgb(124 140 160) !important; }
-html.light body .text-slate-600 { color: rgb(154 167 181) !important; }
-html.light body .hover\:bg-slate-900:hover,
-html.light body .hover\:bg-slate-800:hover { background-color: rgb(231 237 243) !important; }
-html.light body .hover\:text-slate-100:hover,
-html.light body .hover\:text-slate-200:hover { color: rgb(16 24 40) !important; }
+/* ============ Light-mode remaps for hardcoded dark-mode utility classes ============
+   Components use literal Tailwind "slate/cyan/emerald/..." classes tuned for dark
+   backgrounds. These use substring attribute selectors ([class*="..."]) rather than
+   exact class matches so every opacity suffix (/10, /40, ...) and compound variant
+   (hover:, focus:, ...) is covered without enumerating each one — a hover-with-opacity
+   class like "hover:bg-slate-900/60" would silently fall through an exact-match rule
+   and stay dark-on-dark in light mode otherwise. */
+
+/* Backgrounds: dark slate panels -> light surfaces */
+html.light body [class*="bg-slate-950"] { background-color: rgb(245 247 250) !important; }
+html.light body [class*="bg-slate-900"] { background-color: rgb(255 255 255) !important; }
+html.light body [class*="bg-slate-800"] { background-color: rgb(238 242 247) !important; }
+html.light body [class*="hover:bg-slate-900"]:hover,
+html.light body [class*="hover:bg-slate-800"]:hover { background-color: rgb(231 237 243) !important; }
+
+/* Borders: dark slate borders -> light borders */
+html.light body [class*="border-slate-900"] { border-color: rgb(221 227 234) !important; }
+html.light body [class*="border-slate-800"] { border-color: rgb(206 214 223) !important; }
+
+/* Text: pastel slate text (meant for dark backgrounds) -> dark, readable text */
+html.light body [class*="text-slate-100"],
+html.light body [class*="text-slate-200"],
+html.light body [class*="text-slate-300"] { color: rgb(16 24 40) !important; }
+html.light body [class*="text-slate-400"] { color: rgb(91 107 125) !important; }
+html.light body [class*="text-slate-500"] { color: rgb(124 140 160) !important; }
+html.light body [class*="text-slate-600"] { color: rgb(154 167 181) !important; }
+html.light body [class*="hover:text-slate-100"]:hover,
+html.light body [class*="hover:text-slate-200"]:hover { color: rgb(16 24 40) !important; }
+html.light body [class*="text-slate-950"] { color: rgb(255 255 255) !important; }
+
 html.light body ::selection { background: rgb(46, 99, 200); color: white; }
 
-/* Light-mode brand-blue remap for the app's cyan "Ocean OPS" accent — recolors it to the
-   real logo blue (#2E63C8) and fixes contrast on badges/links/buttons against light surfaces.
-   Dark mode is untouched; it keeps its original cyan accent. */
-html.light body [class*="text-slate-950"] { color: rgb(255 255 255) !important; }
+/* Brand-blue accent: the app's cyan "Ocean OPS" accent recolored to the real logo blue
+   (#2E63C8), with darker shades for text so it stays readable on light surfaces. */
 html.light body [class*="bg-cyan-500/10"] { background-color: rgba(46, 99, 200, 0.1) !important; }
 html.light body [class*="bg-cyan-500/15"] { background-color: rgba(46, 99, 200, 0.15) !important; }
 html.light body [class*="border-cyan-500/25"] { border-color: rgba(46, 99, 200, 0.3) !important; }
@@ -118,6 +124,22 @@ html.light body [class*="text-cyan-500"] { color: rgb(46, 99, 200) !important; }
 html.light body [class*="text-cyan-400"] { color: rgb(36, 79, 160) !important; }
 html.light body [class*="text-cyan-300"] { color: rgb(28, 62, 125) !important; }
 html.light body [class*="text-cyan-200"] { color: rgb(28, 62, 125) !important; }
+
+/* Status/accent text colors: pastel shades (200-400, meant for dark backgrounds) ->
+   a darker shade of the same hue so badges/labels stay readable on light surfaces.
+   Translucent backgrounds/borders (bg-*-500/NN, border-*-500/NN) are left alone —
+   a low-opacity tint reads fine over either a dark or light surface. */
+html.light body [class*="text-emerald-200"],
+html.light body [class*="text-emerald-300"],
+html.light body [class*="text-emerald-400"] { color: rgb(4, 120, 87) !important; }
+html.light body [class*="text-amber-200"],
+html.light body [class*="text-amber-300"],
+html.light body [class*="text-amber-400"] { color: rgb(180, 83, 9) !important; }
+html.light body [class*="text-rose-300"],
+html.light body [class*="text-rose-400"] { color: rgb(190, 18, 60) !important; }
+html.light body [class*="text-sky-300"] { color: rgb(3, 105, 161) !important; }
+html.light body [class*="text-purple-200"],
+html.light body [class*="text-purple-300"] { color: rgb(126, 34, 206) !important; }
 
 /* Stronger borders in dark mode for key surfaces */
 html.dark .data-table th,
