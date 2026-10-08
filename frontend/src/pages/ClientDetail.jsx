@@ -65,9 +65,9 @@ function StatusBadge({ status }) {
 function Field({ label, children, className = "" }) {
   if (children === null || children === undefined || children === "") return null;
   return (
-    <div className={className}>
+    <div className={`min-w-[88px] ${className}`}>
       <div className="text-[9px] font-mono uppercase tracking-widest text-slate-500">{label}</div>
-      <div className="text-xs text-slate-200 mt-0.5 break-words leading-snug">{children}</div>
+      <div className="text-sm text-slate-200 mt-0.5 break-words leading-snug">{children}</div>
     </div>
   );
 }
@@ -569,13 +569,13 @@ export default function ClientDetail() {
           <p className="text-sm text-slate-500 mt-1">Add the first shipment for {client.name}.</p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {visibleShipments.map((s) => {
             const overdue = isEtdOverdue(s);
             return (
               <div
                 key={s.id}
-                className={`rounded-lg border p-4 transition-colors ${
+                className={`rounded-lg border p-3 transition-colors ${
                   overdue ? "border-amber-500/40 bg-amber-500/5" :
                   s.anf_received ? "border-purple-500/20 bg-purple-500/5" :
                   "border-slate-800 bg-slate-900/40"
@@ -602,7 +602,7 @@ export default function ClientDetail() {
 
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex items-center gap-2 flex-wrap">
-                    <h3 className="font-semibold text-slate-100 text-sm truncate" data-testid={`shipment-supplier-${s.id}`}>
+                    <h3 className="font-semibold text-slate-100 text-base truncate" data-testid={`shipment-supplier-${s.id}`}>
                       {s.supplier || "Unnamed supplier"}
                     </h3>
                     <StatusBadge status={s.status} />
@@ -695,12 +695,12 @@ export default function ClientDetail() {
                 </div>
 
                 {s.order_booking_file && (
-                  <div className="mt-1.5 text-[11px] text-slate-400 whitespace-pre-wrap leading-snug">{s.order_booking_file}</div>
+                  <div className="mt-1 text-xs text-slate-400 whitespace-pre-wrap leading-snug">{s.order_booking_file}</div>
                 )}
 
-                <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-x-4 gap-y-3">
+                <div className="mt-2.5 flex flex-wrap gap-x-7 gap-y-2">
                   <Field label="File #">{s.file_number}</Field>
-                  <Field label="Vessel" className="col-span-2"><VesselCell ship={s} /></Field>
+                  <Field label="Vessel"><VesselCell ship={s} /></Field>
                   {showOptional.sob_date && <Field label="SOB / RCG">{s.sob_date}</Field>}
                   {showOptional.pol && <Field label="POL">{s.pol}</Field>}
                   <Field label="POD">{s.pod}</Field>
@@ -715,13 +715,13 @@ export default function ClientDetail() {
                     </Field>
                   )}
                   {showOptional.copy_docs_status && (
-                    <div>
+                    <div className="min-w-[140px]">
                       <div className="text-[9px] font-mono uppercase tracking-widest text-slate-500 mb-0.5">Copy docs</div>
                       <Input
                         value={s.copy_docs_status || ""}
                         onChange={(e) => setShipments((prev) => prev.map((x) => x.id === s.id ? { ...x, copy_docs_status: e.target.value } : x))}
                         onBlur={(e) => patchShip(s.id, { copy_docs_status: e.target.value })}
-                        className="bg-slate-900/60 border-slate-800 text-xs h-7 w-full"
+                        className="bg-slate-900/60 border-slate-800 text-sm h-7 w-full"
                         placeholder="—"
                         data-testid={`copy-docs-${s.id}`}
                       />
@@ -729,7 +729,7 @@ export default function ClientDetail() {
                   )}
                 </div>
 
-                <div className="mt-3 text-xs text-slate-300 bg-slate-950/50 border border-slate-800/80 rounded-md px-3 py-2 leading-relaxed" data-testid={`comments-view-${s.id}`}>
+                <div className="mt-2.5 text-sm text-slate-300 bg-slate-950/50 border border-slate-800/80 rounded-md px-3 py-1.5 leading-snug" data-testid={`comments-view-${s.id}`}>
                   {s.comments || <span className="text-slate-600 italic">Auto-generated from vessel status</span>}
                 </div>
               </div>
