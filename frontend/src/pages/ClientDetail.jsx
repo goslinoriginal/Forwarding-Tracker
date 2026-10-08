@@ -26,7 +26,7 @@ import {
 import { toast } from "sonner";
 import {
   ArrowLeft, Plus, ExternalLink, FileSpreadsheet, FileText, MessageSquarePlus, PackageCheck,
-  Ship, Trash2, Copy, Anchor, CalendarClock, Sailboat, AlertTriangle, MoreVertical, Pencil,
+  Ship, Trash2, Copy, Anchor, CalendarClock, Sailboat, AlertTriangle, MoreVertical, Pencil, Mail, Sparkles,
 } from "lucide-react";
 
 const emptyShipment = {
@@ -458,6 +458,7 @@ export default function ClientDetail() {
   };
 
   const downloadReport = async (fmt) => {
+    const extension = fmt.replace("-modern", "");
     try {
       const res = await fetch(`${API}/reports/${clientId}/${fmt}`);
       if (!res.ok) throw new Error("Export failed");
@@ -465,11 +466,26 @@ export default function ClientDetail() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `status-report-${client?.name?.replace(/\s+/g, "_") || "client"}.${fmt}`;
+      a.download = `status-report-${client?.name?.replace(/\s+/g, "_") || "client"}.${extension}`;
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
-      toast.success(`${fmt.toUpperCase()} downloaded`);
+      toast.success(`${extension.toUpperCase()} downloaded`);
     } catch (e) { toast.error("Export failed"); }
+  };
+
+  const draftEmail = () => {
+    const to = (client.email_to || client.contact_email || "").trim();
+    if (!to) { toast.error("Set a status report email for this client first (Clients page)"); return; }
+    const cc = (client.email_cc || "").trim();
+    const greeting = (client.email_greeting || client.name || "").trim();
+    const subject = `Status Report - ${client.name}`;
+    const body = `Dear ${greeting},\n\nPlease see attached Status Report for your pending shipments.\n\nThanks.`;
+    const params = new URLSearchParams();
+    if (cc) params.set("cc", cc);
+    params.set("subject", subject);
+    params.set("body", body);
+    window.location.href = `mailto:${encodeURIComponent(to)}?${params.toString().replace(/\+/g, "%20")}`;
+    toast.info("Draft opened in your email client — attach the downloaded report before sending");
   };
 
   const optionalToggles = OPTIONAL_COLUMNS;
@@ -530,6 +546,23 @@ export default function ClientDetail() {
           </Button>
           <Button variant="outline" onClick={() => downloadReport("pdf")} className="border-slate-700 hover:bg-slate-800" data-testid="export-pdf-button">
             <FileText className="mr-1.5 h-4 w-4" /> PDF
+          </Button>
+          <Button
+            variant="outline" onClick={() => downloadReport("xlsx-modern")}
+            className="border-sky-500/30 text-sky-300 hover:bg-sky-500/10" data-testid="export-excel-modern-button"
+            title="New client-facing design — draft for approval"
+          >
+            <Sparkles className="mr-1.5 h-4 w-4" /> Excel (new)
+          </Button>
+          <Button
+            variant="outline" onClick={() => downloadReport("pdf-modern")}
+            className="border-sky-500/30 text-sky-300 hover:bg-sky-500/10" data-testid="export-pdf-modern-button"
+            title="New client-facing design — draft for approval"
+          >
+            <Sparkles className="mr-1.5 h-4 w-4" /> PDF (new)
+          </Button>
+          <Button variant="outline" onClick={draftEmail} className="border-slate-700 hover:bg-slate-800" data-testid="draft-email-button">
+            <Mail className="mr-1.5 h-4 w-4" /> Draft email
           </Button>
           <Dialog open={openAdd} onOpenChange={setOpenAdd}>
             <DialogTrigger asChild>

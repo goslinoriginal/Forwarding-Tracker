@@ -17,7 +17,7 @@ import {
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { Plus, Settings2, Trash2, ArrowRight, FileSpreadsheet, Star, Ship } from "lucide-react";
+import { Plus, Settings2, Trash2, ArrowRight, FileSpreadsheet, Star, Ship, Mail } from "lucide-react";
 
 const SORT_OPTIONS = [
   { value: "name_asc", label: "Name (A–Z)" },
@@ -70,7 +70,11 @@ export default function ClientsPage() {
   const [clients, setClients] = useState([]);
   const [openAdd, setOpenAdd] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ name: "", company: "Clearfreight", contact_email: "", notes: "", default_pod: "", optional_columns: DEFAULT_TOGGLES });
+  const [form, setForm] = useState({
+    name: "", company: "Clearfreight", contact_email: "", notes: "", default_pod: "",
+    email_to: "", email_cc: "", email_greeting: "",
+    optional_columns: DEFAULT_TOGGLES,
+  });
   const [companyFilter, setCompanyFilter] = useState("all");
   const [activeOnly, setActiveOnly] = useState(false);
   const [onWaterOnly, setOnWaterOnly] = useState(false);
@@ -106,7 +110,11 @@ export default function ClientsPage() {
     return [...pinned, ...rest];
   }, [clients, companyFilter, activeOnly, onWaterOnly, sortMode]);
 
-  const resetForm = () => setForm({ name: "", company: "Clearfreight", contact_email: "", notes: "", default_pod: "", optional_columns: DEFAULT_TOGGLES });
+  const resetForm = () => setForm({
+    name: "", company: "Clearfreight", contact_email: "", notes: "", default_pod: "",
+    email_to: "", email_cc: "", email_greeting: "",
+    optional_columns: DEFAULT_TOGGLES,
+  });
 
   const submit = async () => {
     if (!form.name.trim()) { toast.error("Client name is required"); return; }
@@ -135,6 +143,9 @@ export default function ClientsPage() {
       contact_email: c.contact_email || "",
       notes: c.notes || "",
       default_pod: c.default_pod || "",
+      email_to: c.email_to || "",
+      email_cc: c.email_cc || "",
+      email_greeting: c.email_greeting || "",
       optional_columns: { ...DEFAULT_TOGGLES, ...(c.optional_columns || {}) },
     });
     setOpenAdd(true);
@@ -223,6 +234,44 @@ export default function ClientsPage() {
                   data-testid="client-default-pod-input"
                   className="mt-1.5 bg-slate-900 border-slate-800"
                 />
+              </div>
+              <div className="rounded-md border border-slate-800 bg-slate-900/40 p-3 space-y-3">
+                <Label className="text-slate-300 text-xs uppercase tracking-wider font-mono flex items-center gap-2">
+                  <Mail className="h-3.5 w-3.5" /> Status report email
+                </Label>
+                <p className="text-xs text-slate-500 -mt-1">
+                  Used by the &quot;Draft email&quot; button on this client&apos;s report to pre-fill a message in your email client.
+                </p>
+                <div>
+                  <Label className="text-slate-400 text-[11px]">To</Label>
+                  <Input
+                    value={form.email_to}
+                    onChange={(e) => setForm({ ...form, email_to: e.target.value })}
+                    placeholder="roland@client.com, jessica@client.com"
+                    data-testid="client-email-to-input"
+                    className="mt-1 bg-slate-900 border-slate-800"
+                  />
+                </div>
+                <div>
+                  <Label className="text-slate-400 text-[11px]">CC</Label>
+                  <Input
+                    value={form.email_cc}
+                    onChange={(e) => setForm({ ...form, email_cc: e.target.value })}
+                    placeholder="accounts@client.com"
+                    data-testid="client-email-cc-input"
+                    className="mt-1 bg-slate-900 border-slate-800"
+                  />
+                </div>
+                <div>
+                  <Label className="text-slate-400 text-[11px]">Greeting name(s)</Label>
+                  <Input
+                    value={form.email_greeting}
+                    onChange={(e) => setForm({ ...form, email_greeting: e.target.value })}
+                    placeholder="Roland and Jessica"
+                    data-testid="client-email-greeting-input"
+                    className="mt-1 bg-slate-900 border-slate-800"
+                  />
+                </div>
               </div>
               <div>
                 <Label className="text-slate-300 text-xs uppercase tracking-wider font-mono flex items-center gap-2">

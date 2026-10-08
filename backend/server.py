@@ -21,7 +21,7 @@ from openpyxl.utils import get_column_letter
 from pydantic import BaseModel, ConfigDict, Field
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_LEFT
-from reportlab.lib.pagesizes import A3, landscape
+from reportlab.lib.pagesizes import A3, A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.platypus import Image as RLImage, LongTable, Paragraph, SimpleDocTemplate, Spacer, TableStyle
@@ -88,6 +88,9 @@ class Client(BaseModel):
     notes: Optional[str] = None
     default_pod: Optional[str] = None  # Port of discharge most shipments for this client use
     pinned: bool = False
+    email_to: Optional[str] = None  # recipient(s) for the status-report email draft, comma-separated
+    email_cc: Optional[str] = None  # cc'd address(es), comma-separated
+    email_greeting: Optional[str] = None  # e.g. "Roland and Jessica" for "Dear ..."
     optional_columns: dict = Field(default_factory=lambda: dict(DEFAULT_OPTIONAL_COLUMNS))
     created_at: str = Field(default_factory=_now_iso)
 
@@ -98,6 +101,9 @@ class ClientCreate(BaseModel):
     contact_email: Optional[str] = None
     notes: Optional[str] = None
     default_pod: Optional[str] = None
+    email_to: Optional[str] = None
+    email_cc: Optional[str] = None
+    email_greeting: Optional[str] = None
     optional_columns: Optional[dict] = None
 
 
@@ -108,6 +114,9 @@ class ClientUpdate(BaseModel):
     notes: Optional[str] = None
     default_pod: Optional[str] = None
     pinned: Optional[bool] = None
+    email_to: Optional[str] = None
+    email_cc: Optional[str] = None
+    email_greeting: Optional[str] = None
     optional_columns: Optional[dict] = None
 
 
@@ -260,6 +269,9 @@ async def create_client(payload: ClientCreate):
         contact_email=payload.contact_email,
         notes=payload.notes,
         default_pod=payload.default_pod,
+        email_to=payload.email_to,
+        email_cc=payload.email_cc,
+        email_greeting=payload.email_greeting,
         optional_columns=optional_columns,
     )
     await db.clients.insert_one(client_obj.model_dump())
@@ -275,7 +287,7 @@ async def get_client(client_id: str):
 async def update_client(client_id: str, payload: ClientUpdate):
     existing = await _get_client(client_id)
     updates: dict[str, Any] = {}
-    for field in ["name", "contact_email", "notes", "default_pod"]:
+    for field in ["name", "contact_email", "notes", "default_pod", "email_to", "email_cc", "email_greeting"]:
         value = getattr(payload, field)
         if value is not None:
             updates[field] = value
@@ -1152,6 +1164,246 @@ async def export_pdf(client_id: str):
     client, columns, rows = await _report_rows(client_id)
     content = _build_pdf(client, columns, rows)
     filename = f"shipping-report-{client['name'].replace(' ', '_')}-{datetime.now(timezone.utc).strftime('%Y%m%d')}.pdf"
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ---------- "Modern" client-facing status report (draft, for approval) ----------
+# A simpler, plain-language alternative to the operational report above — fixed
+# column set regardless of a client's report-column toggles (those were built for
+# the internal/operational version), friendlier status wording, and a cleaner,
+# more spacious visual design. Lives alongside the original so both can be
+# compared before deciding whether to replace it.
+
+_CLIENT_STATUS_LABELS = {"Planned": "Preparing", "Booked": "Booked", "Shipped": "On the Water"}
+
+_MODERN_BRAND = "2E63C8"
+_MODERN_LIGHT_BAND = "EEF2F7"
+_MODERN_TEXT = "101828"
+_MODERN_MUTED = "5B6B7D"
+_MODERN_BORDER = "D9DEE5"
+_MODERN_STATUS_FILL = {"Preparing": "E2E8F0", "Booked": "FEF3C7", "On the Water": "D1FAE5"}
+_MODERN_STATUS_TEXT = {"Preparing": "475569", "Booked": "92400E", "On the Water": "065F46"}
+
+
+def _modern_departure_text(s: dict) -> str:
+    if s.get("sob_date"):
+        iso = _to_iso_or_original(s["sob_date"])
+        return f"Sailed {_fmt_dot_full(iso) or s['sob_date']}"
+    if s.get("etd_tba"):
+        return "Date TBA"
+    if s.get("planned_etd"):
+        return f"Expected {_fmt_dot_full(s['planned_etd']) or s['planned_etd']}"
+    return "TBA"
+
+
+async def _modern_report_rows(client_id: str):
+    client = await _get_client(client_id)
+    shipments = await db.shipments.find(
+        {"client_id": client_id, "anf_received": {"$ne": True}}, _proj(),
+    ).sort("created_at", 1).to_list(5000)
+    rows = []
+    for s in shipments:
+        s["comments"] = _regenerate_comment(s)
+        s["status"] = _derive_status(s)
+        rows.append({
+            "supplier": s.get("supplier") or "",
+            "reference": s.get("file_number") or "",
+            "vessel": _cell_value("vessel_block", s),
+            "status": _CLIENT_STATUS_LABELS.get(s.get("status"), s.get("status") or "Preparing"),
+            "departure": _modern_departure_text(s),
+            "arrival": _cell_value("eta", s) or "TBA",
+            "destination": s.get("final_destination") or s.get("pod") or "—",
+            "notes": s.get("comments") or "",
+        })
+    return client, rows
+
+
+def _build_xlsx_modern(client: dict, rows: list[dict]) -> bytes:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Status Report"
+    ws.sheet_view.showGridLines = False
+    ws.page_setup.orientation = ws.ORIENTATION_PORTRAIT
+
+    company_key = client.get("company", "Patuma")
+    co = COMPANIES.get(company_key, COMPANIES["Patuma"])
+    date_str = datetime.now(timezone.utc).strftime("%d %B %Y")
+    headers = ["Supplier", "Reference", "Vessel", "Status", "Departure", "Expected Arrival", "Destination", "Notes"]
+    widths = [18, 14, 26, 14, 18, 18, 16, 44]
+    ncols = len(headers)
+
+    logo_path = co.get("logo")
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncols)
+    ws.row_dimensions[1].height = 54
+    if logo_path and os.path.exists(logo_path):
+        try:
+            img = XLImage(logo_path)
+            aspect = img.width / img.height if img.height else 4
+            target_h_px = 64
+            img.height = target_h_px
+            img.width = int(target_h_px * aspect)
+            ws.add_image(img, "A1")
+        except Exception as exc:
+            logger.warning("Modern xlsx logo embed failed: %s", exc)
+
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=ncols)
+    title_cell = ws.cell(row=2, column=1, value="Shipment Status Report")
+    title_cell.font = Font(bold=True, size=18, color=_MODERN_TEXT, name="Arial")
+    title_cell.alignment = Alignment(horizontal="left", vertical="center")
+    ws.row_dimensions[2].height = 28
+
+    ws.merge_cells(start_row=3, start_column=1, end_row=3, end_column=ncols)
+    sub_cell = ws.cell(row=3, column=1, value=f"Prepared for {client.get('name', '')}  ·  {date_str}")
+    sub_cell.font = Font(size=11, color=_MODERN_MUTED, name="Arial")
+    sub_cell.alignment = Alignment(horizontal="left", vertical="center")
+    ws.row_dimensions[3].height = 20
+    ws.row_dimensions[4].height = 8
+
+    header_row_idx = 5
+    thin = Side(style="thin", color=_MODERN_BORDER)
+    for i, h in enumerate(headers, start=1):
+        c = ws.cell(row=header_row_idx, column=i, value=h)
+        c.font = Font(bold=True, size=11, color="FFFFFF", name="Arial")
+        c.fill = PatternFill("solid", fgColor=_MODERN_BRAND)
+        c.alignment = Alignment(horizontal="left", vertical="center")
+        c.border = Border(top=thin, bottom=thin)
+    ws.row_dimensions[header_row_idx].height = 26
+
+    for offset, row in enumerate(rows, start=1):
+        row_index = header_row_idx + offset
+        band = PatternFill("solid", fgColor="FFFFFF" if offset % 2 else _MODERN_LIGHT_BAND)
+        values = [row["supplier"], row["reference"], row["vessel"], row["status"], row["departure"], row["arrival"], row["destination"], row["notes"]]
+        max_lines = 1
+        for col_index, val in enumerate(values, start=1):
+            c = ws.cell(row=row_index, column=col_index, value=val)
+            c.font = Font(size=10.5, color=_MODERN_TEXT, name="Arial")
+            c.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+            c.border = Border(bottom=thin)
+            c.fill = band
+            if col_index == 4:
+                c.fill = PatternFill("solid", fgColor=_MODERN_STATUS_FILL.get(row["status"], "FFFFFF"))
+                c.font = Font(size=10.5, bold=True, color=_MODERN_STATUS_TEXT.get(row["status"], _MODERN_TEXT), name="Arial")
+                c.alignment = Alignment(horizontal="center", vertical="center")
+            if val:
+                colw = widths[col_index - 1]
+                lines = str(val).splitlines()
+                wrapped = sum(max(1, -(-len(line) // max(colw - 2, 1))) for line in lines)
+                max_lines = max(max_lines, wrapped)
+        ws.row_dimensions[row_index].height = max(22, min(90, 15 * max_lines + 6))
+
+    for i, w in enumerate(widths, start=1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+    ws.freeze_panes = f"A{header_row_idx + 1}"
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
+
+
+def _build_pdf_modern(client: dict, rows: list[dict]) -> bytes:
+    page_width, page_height = A4
+    margin = 18 * mm
+    available_width = page_width - 2 * margin
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle("MTitle", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=20, textColor=colors.HexColor("#101828"), alignment=0, spaceAfter=2)
+    sub_style = ParagraphStyle("MSub", parent=styles["Normal"], fontName="Helvetica", fontSize=10.5, textColor=colors.HexColor("#5B6B7D"), alignment=0, spaceAfter=14)
+    intro_style = ParagraphStyle("MIntro", parent=styles["Normal"], fontName="Helvetica", fontSize=10.5, textColor=colors.HexColor("#344054"), alignment=0, leading=15, spaceAfter=16)
+    header_style = ParagraphStyle("MHeader", parent=styles["Normal"], fontName="Helvetica-Bold", fontSize=9, textColor=colors.white, alignment=0, leading=11)
+    body_style = ParagraphStyle("MBody", parent=styles["Normal"], fontName="Helvetica", fontSize=9, textColor=colors.HexColor("#101828"), alignment=0, leading=12, wordWrap="CJK")
+
+    def para(text, style):
+        safe = escape(str(text or "")).replace("\n", "<br/>")
+        return Paragraph(safe or " ", style)
+
+    story: list = []
+    company_key = client.get("company", "Patuma")
+    co = COMPANIES.get(company_key, COMPANIES["Patuma"])
+    logo_path = co.get("logo")
+    if logo_path and os.path.exists(logo_path):
+        try:
+            from PIL import Image as PILImage
+            pil = PILImage.open(logo_path)
+            aspect = pil.width / pil.height if pil.height else 4
+            target_h = 34
+            logo = RLImage(logo_path, width=target_h * aspect, height=target_h)
+            logo.hAlign = "LEFT"
+            story.append(logo)
+            story.append(Spacer(1, 10))
+        except Exception as exc:
+            logger.warning("Modern PDF logo embed failed: %s", exc)
+
+    story.append(Paragraph("Shipment Status Report", title_style))
+    date_str = datetime.now(timezone.utc).strftime("%d %B %Y")
+    story.append(Paragraph(f"Prepared for {escape(client.get('name', ''))} &middot; {date_str}", sub_style))
+
+    n = len(rows)
+    plural = "shipment" if n == 1 else "shipments"
+    story.append(Paragraph(f"Here's the latest update on your {n} active {plural}.", intro_style))
+
+    headers = ["Supplier", "Reference", "Vessel", "Status", "Departure", "Arrival", "Destination", "Notes"]
+    weights = [11, 9, 16, 10, 12, 12, 12, 24]
+    col_widths = [available_width * w / sum(weights) for w in weights]
+
+    table_data = [[para(h, header_style) for h in headers]]
+    for row in rows:
+        table_data.append([
+            para(row["supplier"], body_style), para(row["reference"], body_style), para(row["vessel"], body_style),
+            para(row["status"], body_style), para(row["departure"], body_style), para(row["arrival"], body_style),
+            para(row["destination"], body_style), para(row["notes"], body_style),
+        ])
+
+    table = LongTable(table_data, colWidths=col_widths, repeatRows=1, splitByRow=1)
+    style_cmds = [
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(f"#{_MODERN_BRAND}")),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor(f"#{_MODERN_BORDER}")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 7),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+    ]
+    for i in range(1, len(table_data)):
+        if i % 2 == 0:
+            style_cmds.append(("BACKGROUND", (0, i), (-1, i), colors.HexColor(f"#{_MODERN_LIGHT_BAND}")))
+    for i, row in enumerate(rows, start=1):
+        fill = _MODERN_STATUS_FILL.get(row["status"])
+        if fill:
+            style_cmds.append(("BACKGROUND", (3, i), (3, i), colors.HexColor(f"#{fill}")))
+    table.setStyle(TableStyle(style_cmds))
+    story.append(table)
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=A4,
+        leftMargin=margin, rightMargin=margin, topMargin=margin, bottomMargin=margin,
+        title=f"Status Report - {client.get('name', '')}",
+    )
+    doc.build(story)
+    return buffer.getvalue()
+
+
+@api_router.get("/reports/{client_id}/xlsx-modern")
+async def export_xlsx_modern(client_id: str):
+    client, rows = await _modern_report_rows(client_id)
+    content = _build_xlsx_modern(client, rows)
+    filename = f"status-report-{client['name'].replace(' ', '_')}-{datetime.now(timezone.utc).strftime('%Y%m%d')}.xlsx"
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@api_router.get("/reports/{client_id}/pdf-modern")
+async def export_pdf_modern(client_id: str):
+    client, rows = await _modern_report_rows(client_id)
+    content = _build_pdf_modern(client, rows)
+    filename = f"status-report-{client['name'].replace(' ', '_')}-{datetime.now(timezone.utc).strftime('%Y%m%d')}.pdf"
     return StreamingResponse(
         io.BytesIO(content),
         media_type="application/pdf",
