@@ -1,5 +1,5 @@
 import { NavLink, useNavigate } from "react-router-dom";
-import { Anchor, LayoutDashboard, Users, ContainerIcon, Sun, Moon } from "lucide-react";
+import { Anchor, LayoutDashboard, Users, Sun, Moon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/lib/theme";
 
@@ -55,17 +55,6 @@ export default function AppShell({ children }) {
             </NavLink>
           ))}
         </nav>
-        <div className="p-4 border-t border-slate-900">
-          <div className="rounded-md bg-slate-900/60 border border-slate-800 p-3">
-            <div className="flex items-center gap-2 text-xs font-mono text-slate-500 uppercase tracking-wider">
-              <ContainerIcon className="h-3.5 w-3.5" />
-              <span>Carriers tracked</span>
-            </div>
-            <div className="mt-2 text-[11px] text-slate-500 leading-relaxed font-mono">
-              MSC · MAERSK · ONE · COSCO<br/>HAPAG · PIL · CMA CGM · VGL
-            </div>
-          </div>
-        </div>
       </aside>
 
       {/* Main */}

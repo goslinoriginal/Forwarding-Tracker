@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api, API, CARRIERS, CARRIER_STYLES, OPTIONAL_COLUMNS, QUICK_COMMENTS, STATUS_STYLES, carrierTrackUrl } from "@/lib/api";
+import { api, API, CARRIERS, CARRIER_STYLES, OPTIONAL_COLUMNS, QUICK_COMMENTS, STATUS_STYLES, carrierTrackUrl, clipboardTrackingNumber } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -171,8 +171,9 @@ function VesselCell({ ship }) {
   const openCarrier = async () => {
     const num = (ship.tracking_doc_number || "").trim();
     if (!num) { toast.info("No tracking number"); return; }
-    try { await navigator.clipboard.writeText(num); } catch {}
-    toast.success(`${num} copied — paste in ${ship.carrier}'s tracking field`);
+    const copyNum = clipboardTrackingNumber(ship.carrier, num);
+    try { await navigator.clipboard.writeText(copyNum); } catch {}
+    toast.success(`${copyNum} copied — paste in ${ship.carrier}'s tracking field`);
     window.open(carrierTrackUrl(ship.carrier, num), "_blank", "noopener,noreferrer");
   };
   return (
