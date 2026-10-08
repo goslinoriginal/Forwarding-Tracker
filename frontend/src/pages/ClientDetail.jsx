@@ -20,10 +20,13 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import {
   ArrowLeft, Plus, ExternalLink, FileSpreadsheet, FileText, MessageSquarePlus, PackageCheck,
-  Ship, Trash2, Copy, Anchor, CalendarClock, Sailboat, AlertTriangle,
+  Ship, Trash2, Copy, Anchor, CalendarClock, Sailboat, AlertTriangle, MoreVertical, Pencil,
 } from "lucide-react";
 
 const emptyShipment = {
@@ -56,6 +59,16 @@ function StatusBadge({ status }) {
     <span className={`text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border ${STATUS_STYLES_LOCAL[status] || STATUS_STYLES_LOCAL.Booked}`}>
       {status}
     </span>
+  );
+}
+
+function Field({ label, children, className = "" }) {
+  if (children === null || children === undefined || children === "") return null;
+  return (
+    <div className={className}>
+      <div className="text-[9px] font-mono uppercase tracking-widest text-slate-500">{label}</div>
+      <div className="text-xs text-slate-200 mt-0.5 break-words leading-snug">{children}</div>
+    </div>
   );
 }
 
@@ -556,213 +569,172 @@ export default function ClientDetail() {
           <p className="text-sm text-slate-500 mt-1">Add the first shipment for {client.name}.</p>
         </div>
       ) : (
-        <div className="rounded-lg border border-slate-800 bg-slate-950 overflow-hidden">
-          <div className="w-full">
-            <table className="w-full data-table text-xs table-fixed">
-              <colgroup>
-                <col className="w-[8%]" />
-                <col className="w-[12%]" />
-                <col className="w-[6%]" />
-                <col className="w-[7%]" />
-                {showOptional.sob_date && <col className="w-[7%]" />}
-                <col className="w-[11%]" />
-                {showOptional.pol && <col className="w-[6%]" />}
-                <col className="w-[7%]" />
-                {showOptional.final_destination && <col className="w-[7%]" />}
-                <col />
-                {showOptional.copy_docs_status && <col className="w-[8%]" />}
-                {showOptional.hbill_released && <col className="w-[5%]" />}
-                {showOptional.expected_freight_rate && <col className="w-[7%]" />}
-                <col className="w-[9%]" />
-              </colgroup>
-              <thead>
-                <tr className="bg-slate-900/90 border-b border-slate-800">
-                  {[
-                    "Supplier", "Order", "Booking File", "Shipped/Pending",
-                    ...(showOptional.sob_date ? ["SOB DATE/RCG"] : []),
-                    "Vessel",
-                    ...(showOptional.pol ? ["POL"] : []),
-                    "DBN Port ETA",
-                    ...(showOptional.final_destination ? ["Final Destination"] : []),
-                    "Comments",
-                    ...(showOptional.copy_docs_status ? ["Copy Docs"] : []),
-                    ...(showOptional.hbill_released ? ["H/bill"] : []),
-                    ...(showOptional.expected_freight_rate ? ["Rate"] : []),
-                    "Actions",
-                  ].map((h) => (
-                    <th key={h} className="text-left px-1.5 py-2 text-[9px] font-mono uppercase tracking-widest text-slate-500 border-r border-slate-800 last:border-r-0 whitespace-nowrap overflow-hidden">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {visibleShipments.map((s, idx) => (
-                  <tr
-                    key={s.id}
-                    className={`border-b align-top ${isEtdOverdue(s) ? "border-amber-500/30 bg-amber-500/5" : "border-slate-800"} ${!isEtdOverdue(s) && (s.anf_received ? "bg-purple-500/5" : idx % 2 === 0 ? "bg-slate-950" : "bg-slate-900/40")}`}
-                    data-testid={`shipment-row-${s.id}`}
-                  >
-                    <td className="px-1.5 py-2 text-slate-200 text-xs break-words" title={s.supplier}>{s.supplier}</td>
-                    <td className="px-1.5 py-2 text-slate-300 whitespace-pre-wrap text-[11px] leading-snug break-words">{s.order_booking_file}</td>
-                    <td className="px-1.5 py-2 font-mono text-[11px] text-slate-300 break-words">{s.file_number}</td>
-                    <td className="px-1.5 py-2"><StatusBadge status={s.status} /></td>
-                    {showOptional.sob_date && <td className="px-1.5 py-2 font-mono text-[11px] text-slate-300 break-words">{s.sob_date}</td>}
-                    <td className="px-1.5 py-2">
-                      <VesselCell ship={s} />
-                    </td>
-                    {showOptional.pol && <td className="px-1.5 py-2 text-slate-300 text-xs break-words">{s.pol}</td>}
-                    <td className="px-1.5 py-2 font-mono text-[11px] text-slate-300 break-words">{s.eta}</td>
-                    {showOptional.final_destination && <td className="px-1.5 py-2 text-slate-300 text-xs break-words">{s.final_destination}</td>}
-                    <td className="px-1.5 py-2">
-                      <Popover>
-                        <PopoverTrigger asChild>
-                          <button
-                            data-testid={`comments-view-${s.id}`}
-                            title={s.comments || ""}
-                            className="text-left w-full text-[11px] text-slate-300 leading-snug line-clamp-3 hover:text-cyan-300 transition-colors"
-                          >
-                            {s.comments || <span className="text-slate-600 italic">Auto-generated from vessel status</span>}
-                          </button>
-                        </PopoverTrigger>
-                        <PopoverContent align="start" className="w-96 bg-slate-950 border-slate-700 p-3">
-                          <div className="text-[10px] font-mono uppercase tracking-widest text-slate-500 mb-2">Full comment</div>
-                          <div className="text-xs text-slate-200 whitespace-pre-wrap leading-relaxed">
-                            {s.comments || "—"}
-                          </div>
-                        </PopoverContent>
-                      </Popover>
-                    </td>
-                    {showOptional.copy_docs_status && (
-                      <td className="px-1.5 py-2 text-[11px] text-slate-300">
-                        <Input
-                          value={s.copy_docs_status || ""}
-                          onChange={(e) => setShipments((prev) => prev.map((x) => x.id === s.id ? { ...x, copy_docs_status: e.target.value } : x))}
-                          onBlur={(e) => patchShip(s.id, { copy_docs_status: e.target.value })}
-                          className="bg-slate-900/60 border-slate-800 text-[11px] h-7 w-full"
-                          placeholder="—"
-                          data-testid={`copy-docs-${s.id}`}
+        <div className="space-y-3">
+          {visibleShipments.map((s) => {
+            const overdue = isEtdOverdue(s);
+            return (
+              <div
+                key={s.id}
+                className={`rounded-lg border p-4 transition-colors ${
+                  overdue ? "border-amber-500/40 bg-amber-500/5" :
+                  s.anf_received ? "border-purple-500/20 bg-purple-500/5" :
+                  "border-slate-800 bg-slate-900/40"
+                }`}
+                data-testid={`shipment-row-${s.id}`}
+              >
+                {overdue && (
+                  <div className="mb-3 flex flex-wrap items-center gap-2.5 px-3 py-2 rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-200 text-xs" data-testid={`etd-overdue-${s.id}`}>
+                    <AlertTriangle className="h-4 w-4 shrink-0" />
+                    <span className="font-medium">Planned ETD {s.planned_etd} has passed — did it sail?</span>
+                    <div className="ml-auto flex flex-wrap gap-1.5">
+                      <DatePickerButton label="Yes, sailed" icon={Sailboat} tone="emerald" onPick={(iso) => setVesselSailed(s, 1, iso)} testid={`mark-first-sailed-${s.id}`} />
+                      <DatePickerButton label="New ETD" icon={CalendarClock} tone="amber" onPick={(iso) => patchShip(s.id, { planned_etd: iso })} testid={`new-etd-${s.id}`} />
+                      <button
+                        onClick={() => patchShip(s.id, { etd_tba: true })}
+                        data-testid={`mark-etd-tba-${s.id}`}
+                        className="inline-flex items-center h-7 px-2 rounded border text-[10px] font-mono uppercase tracking-wider text-amber-300 hover:bg-amber-500/10 border-amber-500/30"
+                      >
+                        Mark TBA
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex items-center gap-2 flex-wrap">
+                    <h3 className="font-semibold text-slate-100 text-sm truncate" data-testid={`shipment-supplier-${s.id}`}>
+                      {s.supplier || "Unnamed supplier"}
+                    </h3>
+                    <StatusBadge status={s.status} />
+                    {s.anf_received && (
+                      <span className="text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-300 border border-purple-500/40">ANF received</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {!overdue && (
+                      s.sob_date ? (
+                        <button
+                          onClick={() => setVesselUnsailed(s, 1)}
+                          data-testid={`unmark-first-sailed-${s.id}`}
+                          title="Unmark 1st vessel as sailed"
+                          className="inline-flex items-center gap-1 h-7 px-2 rounded border text-[10px] font-mono uppercase tracking-wider bg-emerald-500/20 border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/30"
+                        >
+                          <Sailboat className="h-3 w-3" /> 1st SOB
+                        </button>
+                      ) : (
+                        <DatePickerButton
+                          label="1st Sailed" icon={Sailboat} tone="emerald"
+                          onPick={(iso) => setVesselSailed(s, 1, iso)}
+                          testid={`mark-first-sailed-${s.id}`}
+                          disabled={s.anf_received}
                         />
-                      </td>
+                      )
                     )}
-                    {showOptional.hbill_released && (
-                      <td className="px-1.5 py-2 text-center">
-                        {s.hbill_released === true ? <span className="text-emerald-400 text-xs">Yes</span> :
-                         s.hbill_released === false ? <span className="text-rose-400 text-xs">No</span> :
-                         <span className="text-slate-500 text-xs">—</span>}
-                      </td>
+                    {s.etd_tba && !overdue && !s.sob_date && !s.anf_received && (
+                      <DatePickerButton
+                        label="Set ETD" icon={CalendarClock} tone="amber"
+                        onPick={(iso) => patchShip(s.id, { planned_etd: iso })}
+                        testid={`set-etd-from-tba-${s.id}`}
+                      />
                     )}
-                    {showOptional.expected_freight_rate && <td className="px-1.5 py-2 font-mono text-[11px] text-slate-300 break-words">{s.expected_freight_rate}</td>}
-                    <td className="px-1.5 py-2">
-                      <div className="flex flex-col gap-1">
-                        {isEtdOverdue(s) && (
-                          <div className="flex items-center gap-1 px-1.5 py-1 rounded border border-amber-500/40 bg-amber-500/10 text-amber-200 text-[9px] leading-tight" data-testid={`etd-overdue-${s.id}`}>
-                            <AlertTriangle className="h-3 w-3 shrink-0" />
-                            <span>ETD {s.planned_etd} passed — sailed?</span>
-                          </div>
+                    {s.second_vessel_name ? (
+                      s.second_vessel_sob_date ? (
+                        <button
+                          onClick={() => setVesselUnsailed(s, 2)}
+                          data-testid={`unmark-second-sailed-${s.id}`}
+                          title="Unmark 2nd vessel as sailed"
+                          className="inline-flex items-center gap-1 h-7 px-2 rounded border text-[10px] font-mono uppercase tracking-wider bg-emerald-500/20 border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/30"
+                        >
+                          <Sailboat className="h-3 w-3" /> 2nd SOB
+                        </button>
+                      ) : (
+                        <DatePickerButton
+                          label="2nd Sailed" icon={Sailboat} tone="emerald"
+                          onPick={(iso) => setVesselSailed(s, 2, iso)}
+                          testid={`mark-second-sailed-${s.id}`}
+                          disabled={s.anf_received}
+                        />
+                      )
+                    ) : null}
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-slate-400 hover:text-slate-200" data-testid={`shipment-menu-${s.id}`}>
+                          <MoreVertical className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="bg-slate-950 border-slate-800 w-48">
+                        <DropdownMenuItem onClick={() => startEdit(s)} data-testid={`edit-shipment-${s.id}`} className="text-slate-200 focus:bg-slate-800 focus:text-slate-100 cursor-pointer">
+                          <Pencil className="h-3.5 w-3.5 mr-2" /> Edit
+                        </DropdownMenuItem>
+                        {!s.anf_received && (
+                          <DropdownMenuItem onClick={() => markAnf(s)} data-testid={`mark-anf-${s.id}`} className="text-purple-300 focus:bg-purple-500/10 focus:text-purple-200 cursor-pointer">
+                            <PackageCheck className="h-3.5 w-3.5 mr-2" /> Mark ANF received
+                          </DropdownMenuItem>
                         )}
-                        <div className="flex items-center gap-1 flex-wrap">
-                          {s.sob_date ? (
-                            <button
-                              onClick={() => setVesselUnsailed(s, 1)}
-                              data-testid={`unmark-first-sailed-${s.id}`}
-                              title="Unmark 1st vessel as sailed"
-                              className="inline-flex items-center gap-1 h-6 px-1.5 rounded border text-[10px] font-mono uppercase tracking-wider bg-emerald-500/20 border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/30"
-                            >
-                              <Sailboat className="h-3 w-3" /> 1st SOB
-                            </button>
-                          ) : (
-                            <DatePickerButton
-                              label={isEtdOverdue(s) ? "Sailed?" : "1st Sailed"}
-                              icon={Sailboat}
-                              tone="emerald"
-                              onPick={(iso) => setVesselSailed(s, 1, iso)}
-                              testid={`mark-first-sailed-${s.id}`}
-                              disabled={s.anf_received}
-                            />
-                          )}
-                          {isEtdOverdue(s) && !s.anf_received && (
-                            <>
-                              <DatePickerButton
-                                label="New ETD"
-                                icon={CalendarClock}
-                                tone="amber"
-                                onPick={(iso) => patchShip(s.id, { planned_etd: iso })}
-                                testid={`new-etd-${s.id}`}
-                              />
-                              <button
-                                onClick={() => patchShip(s.id, { etd_tba: true })}
-                                data-testid={`mark-etd-tba-${s.id}`}
-                                title="No new date yet — mark ETD as TBA"
-                                className="inline-flex items-center gap-1 h-6 px-1.5 rounded border text-[10px] font-mono uppercase tracking-wider text-amber-300 hover:bg-amber-500/10 border-amber-500/30"
-                              >
-                                TBA
-                              </button>
-                            </>
-                          )}
-                          {s.etd_tba && !isEtdOverdue(s) && !s.sob_date && !s.anf_received && (
-                            <DatePickerButton
-                              label="Set ETD"
-                              icon={CalendarClock}
-                              tone="amber"
-                              onPick={(iso) => patchShip(s.id, { planned_etd: iso })}
-                              testid={`set-etd-from-tba-${s.id}`}
-                            />
-                          )}
-                          {s.second_vessel_name ? (
-                            s.second_vessel_sob_date ? (
-                              <button
-                                onClick={() => setVesselUnsailed(s, 2)}
-                                data-testid={`unmark-second-sailed-${s.id}`}
-                                title="Unmark 2nd vessel as sailed"
-                                className="inline-flex items-center gap-1 h-6 px-1.5 rounded border text-[10px] font-mono uppercase tracking-wider bg-emerald-500/20 border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/30"
-                              >
-                                <Sailboat className="h-3 w-3" /> 2nd SOB
-                              </button>
-                            ) : (
-                              <DatePickerButton
-                                label="2nd Sailed"
-                                icon={Sailboat}
-                                tone="emerald"
-                                onPick={(iso) => setVesselSailed(s, 2, iso)}
-                                testid={`mark-second-sailed-${s.id}`}
-                                disabled={s.anf_received}
-                              />
-                            )
-                          ) : null}
-                        </div>
-                        <div className="flex items-center gap-1">
-                          {!s.anf_received ? (
-                            <Button size="sm" variant="ghost" onClick={() => markAnf(s)} className="h-6 px-1.5 text-purple-300 hover:bg-purple-500/10" data-testid={`mark-anf-${s.id}`} title="ANF received">
-                              <PackageCheck className="h-3.5 w-3.5" />
-                            </Button>
-                          ) : (
-                            <span className="text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-300 border border-purple-500/40">ANF</span>
-                          )}
-                          <Button size="sm" variant="ghost" onClick={() => startEdit(s)} className="h-6 px-1.5 text-slate-400 hover:text-slate-200 text-[10px]" data-testid={`edit-shipment-${s.id}`}>Edit</Button>
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-slate-500 hover:text-rose-400" data-testid={`delete-shipment-${s.id}`}>
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent className="bg-slate-950 border-slate-800">
-                              <AlertDialogHeader>
-                                <AlertDialogTitle className="text-slate-100">Delete shipment?</AlertDialogTitle>
-                                <AlertDialogDescription className="text-slate-400">This can&apos;t be undone.</AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel className="border-slate-700 bg-slate-900">Cancel</AlertDialogCancel>
-                                <AlertDialogAction onClick={() => removeShip(s.id)} className="bg-rose-600 hover:bg-rose-500" data-testid={`confirm-delete-ship-${s.id}`}>Delete</AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
-                        </div>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                        <DropdownMenuSeparator className="bg-slate-800" />
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <DropdownMenuItem onSelect={(e) => e.preventDefault()} data-testid={`delete-shipment-${s.id}`} className="text-rose-400 focus:bg-rose-500/10 focus:text-rose-300 cursor-pointer">
+                              <Trash2 className="h-3.5 w-3.5 mr-2" /> Delete
+                            </DropdownMenuItem>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent className="bg-slate-950 border-slate-800">
+                            <AlertDialogHeader>
+                              <AlertDialogTitle className="text-slate-100">Delete shipment?</AlertDialogTitle>
+                              <AlertDialogDescription className="text-slate-400">This can&apos;t be undone.</AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel className="border-slate-700 bg-slate-900">Cancel</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => removeShip(s.id)} className="bg-rose-600 hover:bg-rose-500" data-testid={`confirm-delete-ship-${s.id}`}>Delete</AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </div>
+
+                {s.order_booking_file && (
+                  <div className="mt-1.5 text-[11px] text-slate-400 whitespace-pre-wrap leading-snug">{s.order_booking_file}</div>
+                )}
+
+                <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-x-4 gap-y-3">
+                  <Field label="File #">{s.file_number}</Field>
+                  <Field label="Vessel" className="col-span-2"><VesselCell ship={s} /></Field>
+                  {showOptional.sob_date && <Field label="SOB / RCG">{s.sob_date}</Field>}
+                  {showOptional.pol && <Field label="POL">{s.pol}</Field>}
+                  <Field label="POD">{s.pod}</Field>
+                  <Field label="DBN Port ETA">{s.eta}</Field>
+                  {showOptional.final_destination && <Field label="Final destination">{s.final_destination}</Field>}
+                  {showOptional.expected_freight_rate && <Field label="Rate">{s.expected_freight_rate}</Field>}
+                  {showOptional.hbill_released && (
+                    <Field label="H/bill released">
+                      {s.hbill_released === true ? <span className="text-emerald-400">Yes</span> :
+                       s.hbill_released === false ? <span className="text-rose-400">No</span> :
+                       <span className="text-slate-500">—</span>}
+                    </Field>
+                  )}
+                  {showOptional.copy_docs_status && (
+                    <div>
+                      <div className="text-[9px] font-mono uppercase tracking-widest text-slate-500 mb-0.5">Copy docs</div>
+                      <Input
+                        value={s.copy_docs_status || ""}
+                        onChange={(e) => setShipments((prev) => prev.map((x) => x.id === s.id ? { ...x, copy_docs_status: e.target.value } : x))}
+                        onBlur={(e) => patchShip(s.id, { copy_docs_status: e.target.value })}
+                        className="bg-slate-900/60 border-slate-800 text-xs h-7 w-full"
+                        placeholder="—"
+                        data-testid={`copy-docs-${s.id}`}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-3 text-xs text-slate-300 bg-slate-950/50 border border-slate-800/80 rounded-md px-3 py-2 leading-relaxed" data-testid={`comments-view-${s.id}`}>
+                  {s.comments || <span className="text-slate-600 italic">Auto-generated from vessel status</span>}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
