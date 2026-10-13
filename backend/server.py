@@ -15,15 +15,23 @@ from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from motor.motor_asyncio import AsyncIOMotorClient
 from openpyxl import Workbook
+from openpyxl.cell.rich_text import CellRichText, TextBlock
+from openpyxl.cell.text import InlineFont
 from openpyxl.drawing.image import Image as XLImage
+from openpyxl.drawing.spreadsheet_drawing import AnchorMarker, OneCellAnchor
+from openpyxl.drawing.xdr import XDRPositiveSize2D
+from openpyxl.formatting.rule import FormulaRule
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
+from openpyxl.utils.units import pixels_to_EMU
+from openpyxl.worksheet.datavalidation import DataValidation
 from pydantic import BaseModel, ConfigDict, Field
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_LEFT
-from reportlab.lib.pagesizes import A3, A4, landscape
+from reportlab.lib.pagesizes import A3, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
+from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.platypus import Image as RLImage, LongTable, Paragraph, SimpleDocTemplate, Spacer, TableStyle
 from starlette.middleware.cors import CORSMiddleware
 
@@ -1236,33 +1244,85 @@ async def export_pdf(client_id: str):
     )
 
 
-# ---------- "Modern" client-facing status report (draft, for approval) ----------
-# A simpler, plain-language alternative to the operational report above — fixed
-# column set regardless of a client's report-column toggles (those were built for
-# the internal/operational version), friendlier status wording, and a cleaner,
-# more spacious visual design. Lives alongside the original so both can be
-# compared before deciding whether to replace it.
+# ---------- "New" client-facing status report (blue #0077b6 design) ----------
+# The approved "Status Report Template v2" design. Uses the same columns as the
+# operational report above — so it follows each client's report-column toggles —
+# restyled in the soft blue theme. The Excel mirrors the hand-tuned
+# Status Report Template.xlsx; the PDF draws the same layout on A3 landscape.
 
-_CLIENT_STATUS_LABELS = {"Planned": "Preparing", "Booked": "Booked", "Shipped": "On the Water"}
+_SR_ACCENT_100 = "E8F3FB"
+_SR_ACCENT_200 = "C8E2F4"
+_SR_ACCENT_300 = "9CCBEC"
+_SR_ACCENT_400 = "2F8FCB"
+_SR_ACCENT_500 = "0077B6"
+_SR_ACCENT_600 = "00659B"
+_SR_ACCENT_700 = "00527E"
+_SR_ACCENT_800 = "003F61"
+_SR_ACCENT_900 = "002B43"
+_SR_TEXT = "1D1F20"
+_SR_MUTED = "5D5D60"
+_SR_DOCS_TEXT = "7A7A7D"
+_SR_BORDER = "C4C4C8"
+_SR_ZEBRA = "F9FCFE"
+_SR_PANEL = "F3F9FD"  # tint behind the docs / H-bill / freight-rate columns
 
-_MODERN_BRAND = "2E63C8"
-_MODERN_LIGHT_BAND = "EEF2F7"
-_MODERN_TEXT = "101828"
-_MODERN_MUTED = "5B6B7D"
-_MODERN_BORDER = "D9DEE5"
-_MODERN_STATUS_FILL = {"Preparing": "E2E8F0", "Booked": "FEF3C7", "On the Water": "D1FAE5"}
-_MODERN_STATUS_TEXT = {"Preparing": "475569", "Booked": "92400E", "On the Water": "065F46"}
+# key -> (header label, Excel width in characters, PDF width in design px)
+_SR_COLUMNS = {
+    "supplier": ("Supplier", 21, 120),
+    "order_booking_file": ("Order", 29, 170),
+    "file_number": ("Booking File", 13, 84),
+    "status": ("Shipped / Pending", 14, 108),
+    "sob_date": ("SOB Date / RCG", 15, 92),
+    "vessel_block": ("Vessel", 29, 170),
+    "pol": ("POL", 15, 92),
+    "eta": ("DBN Port ETA", 15, 92),
+    "final_destination": ("Final Destination", 16, 114),
+    "comments": ("Comments", 42, 240),
+    "copy_docs_status": ("Copy Docs Status", 13, 96),
+    "hbill_released": ("H/bill Released", 13, 96),
+    "expected_freight_rate": ("Freight Rate / Ctr", 16, 100),
+}
+_SR_PANEL_KEYS = {"copy_docs_status", "hbill_released", "expected_freight_rate"}
+_SR_STATUS_OPTIONS = ["Shipped", "Booked", "Pending", "Planned"]
+# status -> (fill, text, outline); Planned gets a dashed outline in the PDF
+_SR_STATUS = {
+    "Shipped": (_SR_ACCENT_200, _SR_ACCENT_900, _SR_ACCENT_300),
+    "Booked": (_SR_ACCENT_100, _SR_ACCENT_800, _SR_ACCENT_300),
+    "Pending": ("F5F5F8", "424244", "D4D4D7"),
+    "Planned": ("FFFFFF", _SR_ACCENT_700, _SR_ACCENT_400),
+}
+_COMMENT_DATE_PREFIX = re.compile(r"^\s*\d{1,2}\.\d{1,2}\s*-\s*")
+# Patuma's letterhead logo has the old "SHIPPING REPORT" banner baked in; this
+# report uses the clean crop from the design instead.
+_SR_LOGOS = {"Patuma": str(ROOT_DIR / "static" / "logos" / "patuma-report.png")}
+# Helvetica runs wider than the design's Barlow, so the PDF gives the date / number
+# columns a little more room than the design's pixel widths.
+_SR_PDF_WIDTHS = {
+    "file_number": 104, "status": 116, "sob_date": 110, "pol": 100, "eta": 110,
+    "final_destination": 142, "hbill_released": 112,
+}
 
 
-def _modern_departure_text(s: dict) -> str:
-    if s.get("sob_date"):
-        iso = _to_iso_or_original(s["sob_date"])
-        return f"Sailed {_fmt_dot_full(iso) or s['sob_date']}"
-    if s.get("etd_tba"):
-        return "Date TBA"
-    if s.get("planned_etd"):
-        return f"Expected {_fmt_dot_full(s['planned_etd']) or s['planned_etd']}"
-    return "TBA"
+def _sr_logo_path(client: dict) -> Optional[str]:
+    company = client.get("company", "Patuma")
+    path = _SR_LOGOS.get(company)
+    if path and os.path.exists(path):
+        return path
+    return COMPANIES.get(company, COMPANIES["Patuma"]).get("logo")
+
+
+def _sr_footer_text(co: dict) -> str:
+    return f"{co['name'].title()} {co['suffix'].title()} · {co['tagline'].title()} · {co['reg']}"
+
+
+def _sr_updated_dd_mm(value: Optional[str]) -> str:
+    if not value:
+        return ""
+    try:
+        d = datetime.fromisoformat(value).astimezone()
+        return f"{d.day:02d}.{d.month:02d}"
+    except Exception:
+        return ""
 
 
 async def _modern_report_rows(client_id: str):
@@ -1270,183 +1330,513 @@ async def _modern_report_rows(client_id: str):
     shipments = await db.shipments.find(
         {"client_id": client_id, "anf_received": {"$ne": True}}, _proj(),
     ).sort("created_at", 1).to_list(5000)
+    columns = _columns_for_client(client)
     rows = []
     for s in shipments:
-        s["comments"] = _regenerate_comment(s)
+        # The comment's own "DD.MM - " stamp is swapped for the shipment's last-updated
+        # date, which the report shows as a separate tag in front of the comment.
+        s["comments"] = _COMMENT_DATE_PREFIX.sub("", _regenerate_comment(s))
         s["status"] = _derive_status(s)
-        rows.append({
-            "supplier": s.get("supplier") or "",
-            "reference": s.get("file_number") or "",
-            "vessel": _cell_value("vessel_block", s),
-            "status": _CLIENT_STATUS_LABELS.get(s.get("status"), s.get("status") or "Preparing"),
-            "departure": _modern_departure_text(s),
-            "arrival": _cell_value("eta", s) or "TBA",
-            "destination": s.get("final_destination") or s.get("pod") or "—",
-            "notes": s.get("comments") or "",
-        })
-    return client, rows
+        row = {key: _cell_value(key, s) for key, _ in columns}
+        row["comment_date"] = _sr_updated_dd_mm(s.get("updated_at"))
+        rows.append(row)
+    return client, columns, rows
 
 
-def _build_xlsx_modern(client: dict, rows: list[dict]) -> bytes:
+def _build_xlsx_modern(client: dict, columns: list[tuple[str, str]], rows: list[dict]) -> bytes:
     wb = Workbook()
     ws = wb.active
     ws.title = "Status Report"
     ws.sheet_view.showGridLines = False
-    ws.page_setup.orientation = ws.ORIENTATION_PORTRAIT
+    ws.sheet_view.zoomScale = 90
 
-    company_key = client.get("company", "Patuma")
-    co = COMPANIES.get(company_key, COMPANIES["Patuma"])
-    date_str = datetime.now(timezone.utc).strftime("%d %B %Y")
-    headers = ["Supplier", "Reference", "Vessel", "Status", "Departure", "Expected Arrival", "Destination", "Notes"]
-    widths = [18, 14, 26, 14, 18, 18, 16, 44]
-    ncols = len(headers)
+    co = COMPANIES.get(client.get("company", "Patuma"), COMPANIES["Patuma"])
+    keys = [key for key, _ in columns]
+    ncols = len(keys)
+    widths = [_SR_COLUMNS[k][1] for k in keys]
+    for i, w in enumerate(widths, start=1):
+        ws.column_dimensions[get_column_letter(i)].width = w
 
-    logo_path = co.get("logo")
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncols)
-    ws.row_dimensions[1].height = 54
+    def solid(color: str) -> PatternFill:
+        return PatternFill("solid", fgColor=color)
+
+    def inline(size: float, color: str, bold: bool = False) -> InlineFont:
+        return InlineFont(rFont="Calibri", sz=size, b=bold, color=color)
+
+    # Row 1 layout: logo (cols A-B) | title | client | report date. The date block takes
+    # the right-most columns, the client block the columns before it, each widening
+    # leftwards until it has room, and the title fills whatever is left in between.
+    date_start = ncols
+    while date_start > 5 and sum(widths[date_start - 1:]) < 22:
+        date_start -= 1
+    client_end = date_start - 1
+    client_start = client_end
+    while client_start > 4 and sum(widths[client_start - 1:client_end]) < 24:
+        client_start -= 1
+    title_end = client_start - 1
+
+    ws.row_dimensions[1].height = 78
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=2)
+    if title_end > 3:
+        ws.merge_cells(start_row=1, start_column=3, end_row=1, end_column=title_end)
+    if client_end > client_start:
+        ws.merge_cells(start_row=1, start_column=client_start, end_row=1, end_column=client_end)
+    if ncols > date_start:
+        ws.merge_cells(start_row=1, start_column=date_start, end_row=1, end_column=ncols)
+
+    logo_path = _sr_logo_path(client)
     if logo_path and os.path.exists(logo_path):
         try:
             img = XLImage(logo_path)
-            aspect = img.width / img.height if img.height else 4
-            target_h_px = 64
-            img.height = target_h_px
-            img.width = int(target_h_px * aspect)
-            ws.add_image(img, "A1")
+            aspect = img.width / img.height if img.height else 10
+            box_w = sum(int(w * 7 + 5) for w in widths[:2]) - 24
+            target_w = box_w
+            target_h = int(target_w / aspect)
+            if target_h > 56:
+                target_h = 56
+                target_w = int(target_h * aspect)
+            row_h_px = int(78 * 96 / 72)
+            img.anchor = OneCellAnchor(
+                _from=AnchorMarker(col=0, colOff=pixels_to_EMU(12), row=0, rowOff=pixels_to_EMU(max(0, (row_h_px - target_h) // 2))),
+                ext=XDRPositiveSize2D(cx=pixels_to_EMU(target_w), cy=pixels_to_EMU(target_h)),
+            )
+            ws.add_image(img)
         except Exception as exc:
-            logger.warning("Modern xlsx logo embed failed: %s", exc)
+            logger.warning("New xlsx logo embed failed: %s", exc)
 
-    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=ncols)
-    title_cell = ws.cell(row=2, column=1, value="Shipment Status Report")
-    title_cell.font = Font(bold=True, size=18, color=_MODERN_TEXT, name="Arial")
-    title_cell.alignment = Alignment(horizontal="left", vertical="center")
-    ws.row_dimensions[2].height = 28
+    # 28pt needs ~62 characters of width on one line; narrower title areas (clients
+    # with few columns) wrap onto two lines at a size that still fits.
+    title_w = sum(widths[2:title_end])
+    title_size = 28 if title_w >= 62 else max(14, min(28, round(28 * title_w / 42)))
+    title = ws.cell(row=1, column=3, value="SHIPPING STATUS REPORT")
+    title.font = Font(name="Calibri", size=title_size, color=_SR_ACCENT_800)
+    title.alignment = Alignment(vertical="center", wrap_text=True, indent=2)
 
-    ws.merge_cells(start_row=3, start_column=1, end_row=3, end_column=ncols)
-    sub_cell = ws.cell(row=3, column=1, value=f"Prepared for {client.get('name', '')}  ·  {date_str}")
-    sub_cell.font = Font(size=11, color=_MODERN_MUTED, name="Arial")
-    sub_cell.alignment = Alignment(horizontal="left", vertical="center")
-    ws.row_dimensions[3].height = 20
-    ws.row_dimensions[4].height = 8
+    client_cell = ws.cell(row=1, column=client_start)
+    client_cell.value = CellRichText(
+        TextBlock(inline(11, _SR_MUTED), "CLIENT\n"),
+        TextBlock(inline(20, _SR_ACCENT_800, bold=True), client.get("name", "")),
+    )
+    client_cell.alignment = Alignment(horizontal="right", vertical="center", wrap_text=True, indent=1)
 
-    header_row_idx = 5
-    thin = Side(style="thin", color=_MODERN_BORDER)
-    for i, h in enumerate(headers, start=1):
-        c = ws.cell(row=header_row_idx, column=i, value=h)
-        c.font = Font(bold=True, size=11, color="FFFFFF", name="Arial")
-        c.fill = PatternFill("solid", fgColor=_MODERN_BRAND)
-        c.alignment = Alignment(horizontal="left", vertical="center")
-        c.border = Border(top=thin, bottom=thin)
-    ws.row_dimensions[header_row_idx].height = 26
+    date_cell = ws.cell(row=1, column=date_start)
+    date_cell.value = CellRichText(
+        TextBlock(inline(11, _SR_ACCENT_100), "REPORT DATE\n"),
+        TextBlock(inline(20, "FFFFFF", bold=True), datetime.now(timezone.utc).strftime("%d.%m.%Y")),
+    )
+    date_cell.alignment = Alignment(vertical="center", wrap_text=True, indent=1)
+    for col in range(date_start, ncols + 1):
+        ws.cell(row=1, column=col).fill = solid(_SR_ACCENT_500)
 
-    for offset, row in enumerate(rows, start=1):
-        row_index = header_row_idx + offset
-        band = PatternFill("solid", fgColor="FFFFFF" if offset % 2 else _MODERN_LIGHT_BAND)
-        values = [row["supplier"], row["reference"], row["vessel"], row["status"], row["departure"], row["arrival"], row["destination"], row["notes"]]
+    # Row 2: the blue stripe under the header; row 3: breathing room
+    ws.row_dimensions[2].height = 4
+    for col in range(1, ncols + 1):
+        ws.cell(row=2, column=col).fill = solid(_SR_ACCENT_500)
+    ws.row_dimensions[3].height = 10
+
+    # Row 4: column headings
+    header_row = 4
+    for col, (key, _) in enumerate(columns, start=1):
+        c = ws.cell(row=header_row, column=col, value=_SR_COLUMNS[key][0].upper())
+        c.font = Font(name="Calibri", size=13, bold=True, color="FFFFFF")
+        c.fill = solid(_SR_ACCENT_600 if key in _SR_PANEL_KEYS else _SR_ACCENT_500)
+        c.alignment = Alignment(vertical="center", wrap_text=True, indent=1)
+    ws.row_dimensions[header_row].height = 46
+
+    # Data rows
+    grid = Side(style="thin", color=_SR_BORDER)
+    cell_border = Border(left=grid, right=grid, top=grid, bottom=grid)
+    body_align = Alignment(vertical="top", wrap_text=True, indent=1)
+    first_data = header_row + 1
+    for offset, row in enumerate(rows):
+        r = first_data + offset
+        band = _SR_ZEBRA if offset % 2 else "FFFFFF"
         max_lines = 1
-        for col_index, val in enumerate(values, start=1):
-            c = ws.cell(row=row_index, column=col_index, value=val)
-            c.font = Font(size=10.5, color=_MODERN_TEXT, name="Arial")
-            c.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
-            c.border = Border(bottom=thin)
-            c.fill = band
-            if col_index == 4:
-                c.fill = PatternFill("solid", fgColor=_MODERN_STATUS_FILL.get(row["status"], "FFFFFF"))
-                c.font = Font(size=10.5, bold=True, color=_MODERN_STATUS_TEXT.get(row["status"], _MODERN_TEXT), name="Arial")
-                c.alignment = Alignment(horizontal="center", vertical="center")
-            if val:
-                colw = widths[col_index - 1]
-                lines = str(val).splitlines()
-                wrapped = sum(max(1, -(-len(line) // max(colw - 2, 1))) for line in lines)
-                max_lines = max(max_lines, wrapped)
-        ws.row_dimensions[row_index].height = max(22, min(90, 15 * max_lines + 6))
+        for col, key in enumerate(keys, start=1):
+            value = row.get(key, "") or ""
+            c = ws.cell(row=r, column=col)
+            c.border = cell_border
+            c.fill = solid(_SR_PANEL if key in _SR_PANEL_KEYS else band)
+            c.alignment = body_align
+            c.font = Font(name="Calibri", size=15, color=_SR_TEXT)
+            if key == "supplier":
+                c.font = Font(name="Calibri", size=15, bold=True, color=_SR_ACCENT_800)
+            elif key == "file_number":
+                c.font = Font(name="Calibri", size=15, bold=True, color=_SR_TEXT)
+            elif key == "status":
+                c.font = Font(name="Calibri", size=14, bold=True, color=_SR_TEXT)
+                c.alignment = Alignment(horizontal="center", vertical="top")
+            elif key == "eta":
+                c.font = Font(name="Calibri", size=15, bold=True, color=_SR_ACCENT_700)
+            elif key == "copy_docs_status":
+                c.font = Font(name="Calibri", size=15, color=_SR_DOCS_TEXT)
+            elif key == "expected_freight_rate":
+                c.font = Font(name="Calibri", size=15, bold=True, color=_SR_ACCENT_800)
 
-    for i, w in enumerate(widths, start=1):
-        ws.column_dimensions[get_column_letter(i)].width = w
-    ws.freeze_panes = f"A{header_row_idx + 1}"
+            if key == "comments" and value and row.get("comment_date"):
+                stamp = f"{row['comment_date']} — "
+                c.value = CellRichText(
+                    TextBlock(inline(15, _SR_ACCENT_700, bold=True), stamp),
+                    TextBlock(inline(15, _SR_TEXT), value),
+                )
+                text_for_size = stamp + value
+            else:
+                c.value = value
+                text_for_size = value
+
+            if text_for_size:
+                # Characters per line at 15pt in a column measured in 11pt characters
+                per_line = max(4, int((widths[col - 1] - 2) * 11 / 15))
+                lines = sum(max(1, -(-len(line) // per_line)) for line in str(text_for_size).splitlines())
+                max_lines = max(max_lines, lines)
+        ws.row_dimensions[r].height = max(30, 21 * max_lines + 14)
+    last_data = first_data + len(rows) - 1
+
+    # Status: dropdown + colour that follows whichever status is picked
+    if rows and "status" in keys:
+        letter = get_column_letter(keys.index("status") + 1)
+        rng = f"{letter}{first_data}:{letter}{last_data}"
+        dv = DataValidation(type="list", formula1=f'"{",".join(_SR_STATUS_OPTIONS)}"', allow_blank=True)
+        ws.add_data_validation(dv)
+        dv.add(rng)
+        for status in _SR_STATUS_OPTIONS:
+            fill, text, _ = _SR_STATUS[status]
+            ws.conditional_formatting.add(rng, FormulaRule(
+                formula=[f'${letter}{first_data}="{status}"'],
+                font=Font(bold=True, color=text),
+                fill=PatternFill(fill_type="solid", start_color=fill, end_color=fill, bgColor=fill),
+            ))
+
+    # Footer: status key on the left, company line on the right (or underneath when
+    # there aren't enough columns left to hold it)
+    footer_row = last_data + 2 if rows else first_data + 1
+    ws.row_dimensions[footer_row - 1].height = 30
+    ws.row_dimensions[footer_row].height = 28
+    split = 1
+    while split < ncols and sum(widths[:split]) < 70:
+        split += 1
+    key_cell = ws.cell(row=footer_row, column=1)
+    key_cell.value = CellRichText(
+        TextBlock(inline(12, _SR_MUTED), "STATUS KEY   "),
+        TextBlock(inline(14, _SR_ACCENT_300), "■ "),
+        TextBlock(inline(12, _SR_MUTED), "Shipped   "),
+        TextBlock(inline(14, _SR_ACCENT_200), "■ "),
+        TextBlock(inline(12, _SR_MUTED), "Booked   "),
+        TextBlock(inline(14, _SR_BORDER), "■ "),
+        TextBlock(inline(12, _SR_MUTED), "Pending   "),
+        TextBlock(inline(14, _SR_ACCENT_700), "□ "),
+        TextBlock(inline(12, _SR_MUTED), "Planned"),
+    )
+    key_cell.alignment = Alignment(vertical="center")
+    if split > 1:
+        ws.merge_cells(start_row=footer_row, start_column=1, end_row=footer_row, end_column=split)
+    footer_text = _sr_footer_text(co)
+    if sum(widths[split:]) >= len(footer_text) + 4:
+        line_row, line_start = footer_row, split + 1
+    else:
+        line_row, line_start = footer_row + 1, 1
+        ws.row_dimensions[line_row].height = 24
+    line_cell = ws.cell(row=line_row, column=line_start, value=footer_text)
+    line_cell.font = Font(name="Calibri", size=12, color=_SR_MUTED)
+    line_cell.alignment = Alignment(horizontal="right", vertical="center")
+    if ncols > line_start:
+        ws.merge_cells(start_row=line_row, start_column=line_start, end_row=line_row, end_column=ncols)
+
+    # Printing: landscape A4, one page wide, header + column titles on every page
+    ws.page_setup.orientation = ws.ORIENTATION_LANDSCAPE
+    ws.page_setup.paperSize = ws.PAPERSIZE_A4
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.print_title_rows = f"1:{header_row}"
+    ws.print_options.horizontalCentered = True
+    ws.page_margins.left = ws.page_margins.right = 0.3
+    ws.page_margins.top = ws.page_margins.bottom = 0.4
 
     buffer = io.BytesIO()
     wb.save(buffer)
     return buffer.getvalue()
 
 
-def _build_pdf_modern(client: dict, rows: list[dict]) -> bytes:
-    page_width, page_height = A4
-    margin = 18 * mm
+def _build_pdf_modern(client: dict, columns: list[tuple[str, str]], rows: list[dict]) -> bytes:
+    page_width, _ = landscape(A3)
+    margin = 10 * mm
     available_width = page_width - 2 * margin
+    s = available_width / 1440  # the design is drawn on a 1440px-wide page
+
+    def hexc(value: str):
+        return colors.HexColor(f"#{value}")
 
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle("MTitle", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=20, textColor=colors.HexColor("#101828"), alignment=0, spaceAfter=2)
-    sub_style = ParagraphStyle("MSub", parent=styles["Normal"], fontName="Helvetica", fontSize=10.5, textColor=colors.HexColor("#5B6B7D"), alignment=0, spaceAfter=14)
-    intro_style = ParagraphStyle("MIntro", parent=styles["Normal"], fontName="Helvetica", fontSize=10.5, textColor=colors.HexColor("#344054"), alignment=0, leading=15, spaceAfter=16)
-    header_style = ParagraphStyle("MHeader", parent=styles["Normal"], fontName="Helvetica-Bold", fontSize=9, textColor=colors.white, alignment=0, leading=11)
-    body_style = ParagraphStyle("MBody", parent=styles["Normal"], fontName="Helvetica", fontSize=9, textColor=colors.HexColor("#101828"), alignment=0, leading=12, wordWrap="CJK")
 
-    def para(text, style):
+    def pstyle(name: str, size: float, color: str, bold: bool = False, leading: float = 1.2, align: int = 0, scale: Optional[float] = None) -> ParagraphStyle:
+        scale = scale or s
+        return ParagraphStyle(
+            name, parent=styles["Normal"], fontName="Helvetica-Bold" if bold else "Helvetica",
+            fontSize=size * scale, leading=size * scale * leading, textColor=hexc(color), alignment=align,
+        )
+
+    def para(text: str, style: ParagraphStyle) -> Paragraph:
         safe = escape(str(text or "")).replace("\n", "<br/>")
         return Paragraph(safe or " ", style)
 
+    co = COMPANIES.get(client.get("company", "Patuma"), COMPANIES["Patuma"])
     story: list = []
-    company_key = client.get("company", "Patuma")
-    co = COMPANIES.get(company_key, COMPANIES["Patuma"])
-    logo_path = co.get("logo")
+
+    # ----- Header: logo | title | client | report date -----
+    label_style = pstyle("SRLabel", 13, _SR_MUTED)
+    date_label_style = pstyle("SRDateLabel", 13, _SR_ACCENT_100)
+    name_style = pstyle("SRName", 28, _SR_ACCENT_800, bold=True, leading=1.1)
+    date_style = pstyle("SRDate", 28, "FFFFFF", bold=True, leading=1.1)
+    client_name = client.get("name", "")
+    date_str = datetime.now(timezone.utc).strftime("%d.%m.%Y")
+
+    logo_w = 400 * s
+    client_w = min(360 * s, max(stringWidth("CLIENT", "Helvetica", 13 * s), stringWidth(client_name, "Helvetica-Bold", 28 * s)) + 66 * s)
+    date_w = max(stringWidth("REPORT DATE", "Helvetica", 13 * s), stringWidth(date_str, "Helvetica-Bold", 28 * s)) + 66 * s
+    title_w = available_width - logo_w - client_w - date_w
+
+    title_text = "SHIPPING STATUS REPORT"
+    title_size = 44 * s
+    max_title = title_w - 66 * s
+    if stringWidth(title_text, "Helvetica", title_size) > max_title:
+        title_size = title_size * max_title / stringWidth(title_text, "Helvetica", title_size)
+    title_style = ParagraphStyle(
+        "SRTitle", parent=styles["Normal"], fontName="Helvetica", fontSize=title_size,
+        leading=title_size, textColor=hexc(_SR_ACCENT_800),
+    )
+
+    logo_cell: Any = ""
+    logo_path = _sr_logo_path(client)
     if logo_path and os.path.exists(logo_path):
         try:
             from PIL import Image as PILImage
             pil = PILImage.open(logo_path)
-            aspect = pil.width / pil.height if pil.height else 4
-            target_h = 34
-            logo = RLImage(logo_path, width=target_h * aspect, height=target_h)
-            logo.hAlign = "LEFT"
-            story.append(logo)
-            story.append(Spacer(1, 10))
+            aspect = pil.width / pil.height if pil.height else 10
+            w = logo_w - 56 * s
+            h = w / aspect
+            if h > 60 * s:
+                h = 60 * s
+                w = h * aspect
+            logo_cell = RLImage(logo_path, width=w, height=h)
+            logo_cell.hAlign = "LEFT"
         except Exception as exc:
-            logger.warning("Modern PDF logo embed failed: %s", exc)
+            logger.warning("New PDF logo embed failed: %s", exc)
+    if logo_cell == "":
+        logo_cell = para(f"{co['name']} {co['suffix']}", pstyle("SRCo", 22, _SR_ACCENT_800, bold=True))
 
-    story.append(Paragraph("Shipment Status Report", title_style))
-    date_str = datetime.now(timezone.utc).strftime("%d %B %Y")
-    story.append(Paragraph(f"Prepared for {escape(client.get('name', ''))} &middot; {date_str}", sub_style))
+    header = LongTable(
+        [[
+            logo_cell,
+            Paragraph(title_text, title_style),
+            [para("CLIENT", label_style), Spacer(1, 6 * s), para(client_name, name_style)],
+            [para("REPORT DATE", date_label_style), Spacer(1, 6 * s), para(date_str, date_style)],
+        ]],
+        colWidths=[logo_w, title_w, client_w, date_w],
+    )
+    divider = hexc(_SR_ACCENT_200)
+    header.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 30 * s),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 30 * s),
+        ("LEFTPADDING", (0, 0), (0, 0), 28 * s),
+        ("RIGHTPADDING", (0, 0), (0, 0), 28 * s),
+        ("LEFTPADDING", (1, 0), (-1, 0), 32 * s),
+        ("RIGHTPADDING", (1, 0), (-1, 0), 32 * s),
+        ("LINEAFTER", (0, 0), (0, 0), 1, divider),
+        ("LINEBEFORE", (2, 0), (2, 0), 1, divider),
+        ("LINEAFTER", (2, 0), (2, 0), 1, divider),
+        ("BACKGROUND", (3, 0), (3, 0), hexc(_SR_ACCENT_500)),
+    ]))
+    story.append(header)
 
-    n = len(rows)
-    plural = "shipment" if n == 1 else "shipments"
-    story.append(Paragraph(f"Here's the latest update on your {n} active {plural}.", intro_style))
+    stripe = LongTable([[""]], colWidths=[available_width], rowHeights=[3 * s])
+    stripe.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), hexc(_SR_ACCENT_500)),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    story.append(stripe)
+    story.append(Spacer(1, 36 * s))
 
-    headers = ["Supplier", "Reference", "Vessel", "Status", "Departure", "Arrival", "Destination", "Notes"]
-    weights = [11, 9, 16, 10, 12, 12, 12, 24]
-    col_widths = [available_width * w / sum(weights) for w in weights]
+    # ----- Shipment table -----
+    # When a client has many report columns switched on, the whole table is scaled
+    # down together (like the design zooming to fit) instead of squeezing columns.
+    keys = [key for key, _ in columns]
+    table_width = available_width - 72 * s
+    px = {k: _SR_PDF_WIDTHS.get(k, _SR_COLUMNS[k][2]) for k in keys}
+    needed = sum(w for k, w in px.items() if k != "comments") + (240 if "comments" in keys else 0)
+    t = s * min(1.0, (1440 - 72) / needed)
+    col_widths = [px[k] * t for k in keys]
+    if "comments" in keys:
+        col_widths[keys.index("comments")] = table_width - sum(w for k, w in zip(keys, col_widths) if k != "comments")
+    else:
+        col_widths = [w * table_width / sum(col_widths) for w in col_widths]
 
-    table_data = [[para(h, header_style) for h in headers]]
+    pad_v, pad_h = 14 * t, 10 * t
+    # Column headings wrap between words only, so size them to fit the longest word
+    head_size = 16 * t
+    for k, w in zip(keys, col_widths):
+        for word in _SR_COLUMNS[k][0].upper().split():
+            head_size = min(head_size, (w - 2 * pad_h - 1) / stringWidth(word, "Helvetica-Bold", 1))
+    header_style = pstyle("SRHead", head_size / t, "FFFFFF", bold=True, leading=1.15, scale=t)
+    body = pstyle("SRBody", 16, _SR_TEXT, leading=1.45, scale=t)
+    body_bold = pstyle("SRBodyBold", 16, _SR_TEXT, bold=True, leading=1.45, scale=t)
+    supplier_style = pstyle("SRSupplier", 16, _SR_ACCENT_800, bold=True, leading=1.45, scale=t)
+    eta_style = pstyle("SREta", 16, _SR_ACCENT_700, bold=True, leading=1.45, scale=t)
+    docs_style = pstyle("SRDocs", 16, _SR_DOCS_TEXT, leading=1.45, scale=t)
+    rate_style = pstyle("SRRate", 16, _SR_ACCENT_800, bold=True, leading=1.45, scale=t)
+    pill_size = 13 * t
+    chip_style = pstyle("SRChip", 13, _SR_ACCENT_800, bold=True, leading=1.3, scale=t)
+
+    def status_pill(status: str):
+        if not status:
+            return ""
+        fill, text, outline = _SR_STATUS.get(status, _SR_STATUS["Pending"])
+        label = status.upper()
+        style = ParagraphStyle(
+            "SRPill", parent=styles["Normal"], fontName="Helvetica-Bold", fontSize=pill_size,
+            leading=pill_size * 1.2, textColor=hexc(text),
+        )
+        pill = LongTable([[Paragraph(escape(label), style)]], colWidths=[stringWidth(label, "Helvetica-Bold", pill_size) + 20 * t + 1])
+        pill.hAlign = "LEFT"
+        box = ("BOX", (0, 0), (-1, -1), 0.75, hexc(outline), None, (2, 2)) if status == "Planned" else ("BOX", (0, 0), (-1, -1), 0.75, hexc(outline))
+        pill.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), hexc(fill)),
+            box,
+            ("TOPPADDING", (0, 0), (-1, -1), 3 * t),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3 * t),
+            ("LEFTPADDING", (0, 0), (-1, -1), 10 * t),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 10 * t),
+        ]))
+        return pill
+
+    def comment_cell(text: str, stamp: str, width: float):
+        if not stamp:
+            return para(text, body)
+        chip_w = stringWidth(stamp, "Helvetica-Bold", 13 * t) + 12 * t + 1
+        chip = LongTable([[Paragraph(escape(stamp), chip_style)]], colWidths=[chip_w])
+        chip.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), hexc(_SR_ACCENT_100)),
+            ("TOPPADDING", (0, 0), (-1, -1), 1 * t),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2 * t),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6 * t),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6 * t),
+        ]))
+        inner = LongTable([[chip, para(text, body)]], colWidths=[chip_w, max(20, width - 2 * pad_h - chip_w)])
+        inner.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("LEFTPADDING", (1, 0), (1, 0), 10 * t),
+            ("TOPPADDING", (0, 0), (0, 0), 3 * t),
+        ]))
+        return inner
+
+    cell_styles = {
+        "supplier": supplier_style, "file_number": body_bold, "eta": eta_style,
+        "copy_docs_status": docs_style, "expected_freight_rate": rate_style,
+    }
+    table_data = [[para(_SR_COLUMNS[k][0].upper(), header_style) for k in keys]]
     for row in rows:
-        table_data.append([
-            para(row["supplier"], body_style), para(row["reference"], body_style), para(row["vessel"], body_style),
-            para(row["status"], body_style), para(row["departure"], body_style), para(row["arrival"], body_style),
-            para(row["destination"], body_style), para(row["notes"], body_style),
-        ])
+        cells = []
+        for i, key in enumerate(keys):
+            value = row.get(key, "") or ""
+            if key == "status":
+                cells.append(status_pill(value))
+            elif key == "comments":
+                cells.append(comment_cell(value, row.get("comment_date", "") if value else "", col_widths[i]))
+            else:
+                cells.append(para(value, cell_styles.get(key, body)))
+        table_data.append(cells)
 
     table = LongTable(table_data, colWidths=col_widths, repeatRows=1, splitByRow=1)
-    style_cmds = [
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(f"#{_MODERN_BRAND}")),
-        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor(f"#{_MODERN_BORDER}")),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 6),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-        ("TOPPADDING", (0, 0), (-1, -1), 7),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+    line = hexc(_SR_BORDER)
+    cmds = [
+        ("BACKGROUND", (0, 0), (-1, 0), hexc(_SR_ACCENT_500)),
+        ("VALIGN", (0, 0), (-1, 0), "BOTTOM"),
+        ("VALIGN", (0, 1), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), pad_v),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), pad_v),
+        ("LEFTPADDING", (0, 0), (-1, -1), pad_h),
+        ("RIGHTPADDING", (0, 0), (-1, -1), pad_h),
     ]
-    for i in range(1, len(table_data)):
-        if i % 2 == 0:
-            style_cmds.append(("BACKGROUND", (0, i), (-1, i), colors.HexColor(f"#{_MODERN_LIGHT_BAND}")))
-    for i, row in enumerate(rows, start=1):
-        fill = _MODERN_STATUS_FILL.get(row["status"])
-        if fill:
-            style_cmds.append(("BACKGROUND", (3, i), (3, i), colors.HexColor(f"#{fill}")))
-    table.setStyle(TableStyle(style_cmds))
+    if rows:
+        cmds += [
+            ("INNERGRID", (0, 1), (-1, -1), 0.6, line),
+            ("BOX", (0, 1), (-1, -1), 0.6, line),
+        ]
+    for i in range(2, len(table_data), 2):
+        cmds.append(("BACKGROUND", (0, i), (-1, i), hexc(_SR_ZEBRA)))
+    for i, key in enumerate(keys):
+        if key in _SR_PANEL_KEYS:
+            cmds.append(("BACKGROUND", (i, 0), (i, 0), hexc(_SR_ACCENT_600)))
+            if rows:
+                cmds.append(("BACKGROUND", (i, 1), (i, -1), hexc(_SR_PANEL)))
+    table.setStyle(TableStyle(cmds))
+    table.hAlign = "CENTER"
     story.append(table)
+
+    # ----- Footer: status key + company line -----
+    small = pstyle("SRSmall", 13, _SR_MUTED)
+    small_right = pstyle("SRSmallRight", 13, _SR_MUTED, align=2)
+    sw = 12 * s
+
+    def swatch(fill: Optional[str], outline: Optional[str] = None, dashed: bool = False):
+        box = LongTable([[""]], colWidths=[sw], rowHeights=[sw])
+        cmds = [("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 0)]
+        if fill:
+            cmds.append(("BACKGROUND", (0, 0), (-1, -1), hexc(fill)))
+        if outline:
+            cmds.append(("BOX", (0, 0), (-1, -1), 0.75, hexc(outline), None, (2, 2)) if dashed else ("BOX", (0, 0), (-1, -1), 0.75, hexc(outline)))
+        box.setStyle(TableStyle(cmds))
+        return box
+
+    key_items = [
+        ("STATUS KEY", None),
+        ("Shipped", swatch(_SR_ACCENT_300)),
+        ("Booked", swatch(_SR_ACCENT_100, _SR_ACCENT_300)),
+        ("Pending", swatch("E7E7EA")),
+        ("Planned", swatch(None, _SR_ACCENT_400, dashed=True)),
+    ]
+    key_cells: list = []
+    key_widths: list = []
+    for label, sw_box in key_items:
+        if sw_box is not None:
+            key_cells.append(sw_box)
+            key_widths.append(sw + 8 * s)
+        key_cells.append(para(label, small))
+        key_widths.append(stringWidth(label, "Helvetica", 13 * s) + 20 * s)
+    key_table = LongTable([key_cells], colWidths=key_widths)
+    key_table.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    key_w = sum(key_widths)
+    footer = LongTable(
+        [[key_table, para(_sr_footer_text(co), small_right)]],
+        colWidths=[key_w, table_width - key_w],
+    )
+    footer.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 20 * s),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    footer.hAlign = "CENTER"
+    story.append(footer)
 
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
-        buffer, pagesize=A4,
+        buffer, pagesize=landscape(A3),
         leftMargin=margin, rightMargin=margin, topMargin=margin, bottomMargin=margin,
-        title=f"Status Report - {client.get('name', '')}",
+        title=f"Shipping Status Report - {client.get('name', '')}",
     )
     doc.build(story)
     return buffer.getvalue()
@@ -1454,8 +1844,8 @@ def _build_pdf_modern(client: dict, rows: list[dict]) -> bytes:
 
 @api_router.get("/reports/{client_id}/xlsx-modern")
 async def export_xlsx_modern(client_id: str):
-    client, rows = await _modern_report_rows(client_id)
-    content = _build_xlsx_modern(client, rows)
+    client, columns, rows = await _modern_report_rows(client_id)
+    content = _build_xlsx_modern(client, columns, rows)
     filename = f"status-report-{client['name'].replace(' ', '_')}-{datetime.now(timezone.utc).strftime('%Y%m%d')}.xlsx"
     return StreamingResponse(
         io.BytesIO(content),
@@ -1466,8 +1856,8 @@ async def export_xlsx_modern(client_id: str):
 
 @api_router.get("/reports/{client_id}/pdf-modern")
 async def export_pdf_modern(client_id: str):
-    client, rows = await _modern_report_rows(client_id)
-    content = _build_pdf_modern(client, rows)
+    client, columns, rows = await _modern_report_rows(client_id)
+    content = _build_pdf_modern(client, columns, rows)
     filename = f"status-report-{client['name'].replace(' ', '_')}-{datetime.now(timezone.utc).strftime('%Y%m%d')}.pdf"
     return StreamingResponse(
         io.BytesIO(content),
