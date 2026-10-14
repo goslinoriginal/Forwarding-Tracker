@@ -1277,7 +1277,7 @@ _SR_COLUMNS = {
     "pol": ("POL", 15, 92),
     "eta": ("DBN Port ETA", 15, 92),
     "final_destination": ("Final Destination", 16, 114),
-    "comments": ("Comments", 42, 240),
+    "comments": ("Comments", 48, 240),
     "copy_docs_status": ("Copy Docs Status", 13, 96),
     "hbill_released": ("H/bill Released", 13, 96),
     "expected_freight_rate": ("Freight Rate / Ctr", 16, 100),
@@ -1347,6 +1347,21 @@ def _sr_updated_dd_mm(value: Optional[str]) -> str:
         return ""
 
 
+def _sr_vessel_text(ship: dict) -> str:
+    """Each vessel on its own line, with its "(1st Vessel)" label on the line below."""
+    legs = _vessel_legs(ship)
+    multi = len(legs) > 1
+    parts = []
+    for leg in legs:
+        if leg["name"]:
+            parts.append(leg["name"])
+            if multi:
+                parts.append(f"({_ordinal(leg['index'])} Vessel)")
+    if ship.get("tracking_doc_number"):
+        parts.append(ship["tracking_doc_number"])
+    return "\n".join(parts)
+
+
 async def _modern_report_rows(client_id: str):
     client = await _get_client(client_id)
     shipments = await db.shipments.find(
@@ -1360,6 +1375,8 @@ async def _modern_report_rows(client_id: str):
         s["comments"] = _COMMENT_DATE_PREFIX.sub("", _regenerate_comment(s))
         s["status"] = _derive_status(s)
         row = {key: _cell_value(key, s) for key, _ in columns}
+        if "vessel_block" in row:
+            row["vessel_block"] = _sr_vessel_text(s)
         row["comment_date"] = _sr_updated_dd_mm(s.get("updated_at"))
         rows.append(row)
     return client, columns, rows
@@ -1376,8 +1393,7 @@ def _build_xlsx_modern(client: dict, columns: list[tuple[str, str]], rows: list[
     keys = [key for key, _ in columns]
     ncols = len(keys)
     # Start from the template widths, then widen any column whose heading word or
-    # longest value (dates, booking numbers...) wouldn't fit on one line. The extra
-    # width is taken back from Comments so the sheet still fits across the screen.
+    # longest value (dates, booking numbers...) wouldn't fit on one line.
     base_widths = [_SR_COLUMNS[k][1] for k in keys]
     widths = []
     for key, base in zip(keys, base_widths):
@@ -1388,10 +1404,6 @@ def _build_xlsx_modern(client: dict, columns: list[tuple[str, str]], rows: list[
                     size = 14 if key == "status" else 15
                     need = max(need, _xl_text_units(token, size, bold=key in _XL_BOLD_KEYS))
         widths.append(min(40, max(base, round(need + _XL_CELL_PAD + 0.49))))
-    if "comments" in keys:
-        ci = keys.index("comments")
-        excess = sum(widths) - sum(base_widths)
-        widths[ci] = max(32, widths[ci] - excess)
     for i, w in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
