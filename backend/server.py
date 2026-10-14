@@ -1291,6 +1291,28 @@ _SR_STATUS = {
     "Pending": ("F5F5F8", "424244", "D4D4D7"),
     "Planned": ("FFFFFF", _SR_ACCENT_700, _SR_ACCENT_400),
 }
+# Excel column widths are in "characters" of the default 11pt font. These estimate
+# how many of those a piece of text needs at a given size, so a column can be made
+# wide enough that no word or date ever breaks mid-way.
+_XL_NARROW = set(".,:;'!|()-/ ")
+
+
+def _xl_text_units(text: str, size: float, bold: bool = False) -> float:
+    units = 0.0
+    for ch in text:
+        if ch in _XL_NARROW:
+            units += 0.55
+        elif ch.isupper() or ch in "$%&@#WMwm":
+            units += 1.3
+        else:
+            units += 1.0
+    return units * size / 11 * (1.1 if bold else 1.0)
+
+
+_XL_BOLD_KEYS = {"supplier", "file_number", "status", "eta", "expected_freight_rate"}
+_XL_CELL_PAD = 3.5  # indent + cell margins, in width units
+
+
 _COMMENT_DATE_PREFIX = re.compile(r"^\s*\d{1,2}\.\d{1,2}\s*-\s*")
 # Patuma's letterhead logo has the old "SHIPPING REPORT" banner baked in; this
 # report uses the clean crop from the design instead.
@@ -1353,7 +1375,23 @@ def _build_xlsx_modern(client: dict, columns: list[tuple[str, str]], rows: list[
     co = COMPANIES.get(client.get("company", "Patuma"), COMPANIES["Patuma"])
     keys = [key for key, _ in columns]
     ncols = len(keys)
-    widths = [_SR_COLUMNS[k][1] for k in keys]
+    # Start from the template widths, then widen any column whose heading word or
+    # longest value (dates, booking numbers...) wouldn't fit on one line. The extra
+    # width is taken back from Comments so the sheet still fits across the screen.
+    base_widths = [_SR_COLUMNS[k][1] for k in keys]
+    widths = []
+    for key, base in zip(keys, base_widths):
+        need = max(_xl_text_units(word, 13, bold=True) for word in _SR_COLUMNS[key][0].upper().split())
+        if key not in ("comments", "order_booking_file", "vessel_block"):
+            for row in rows:
+                for token in str(row.get(key, "") or "").split():
+                    size = 14 if key == "status" else 15
+                    need = max(need, _xl_text_units(token, size, bold=key in _XL_BOLD_KEYS))
+        widths.append(min(40, max(base, round(need + _XL_CELL_PAD + 0.49))))
+    if "comments" in keys:
+        ci = keys.index("comments")
+        excess = sum(widths) - sum(base_widths)
+        widths[ci] = max(32, widths[ci] - excess)
     for i, w in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
@@ -1441,7 +1479,18 @@ def _build_xlsx_modern(client: dict, columns: list[tuple[str, str]], rows: list[
         c.font = Font(name="Calibri", size=13, bold=True, color="FFFFFF")
         c.fill = solid(_SR_ACCENT_600 if key in _SR_PANEL_KEYS else _SR_ACCENT_500)
         c.alignment = Alignment(vertical="center", wrap_text=True, indent=1)
-    ws.row_dimensions[header_row].height = 46
+    # Tall enough for however many lines the longest heading wraps onto
+    head_lines = 1
+    for key, w in zip(keys, widths):
+        lines, used = 1, 0.0
+        for word in _SR_COLUMNS[key][0].upper().split():
+            wu = _xl_text_units(word, 13, bold=True)
+            if used and used + 0.6 + wu > w - _XL_CELL_PAD:
+                lines, used = lines + 1, wu
+            else:
+                used += (0.6 if used else 0) + wu
+        head_lines = max(head_lines, lines)
+    ws.row_dimensions[header_row].height = max(46, 18 * head_lines + 12)
 
     # Data rows
     grid = Side(style="thin", color=_SR_BORDER)
