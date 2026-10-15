@@ -1111,6 +1111,25 @@ _C_YELLOW = colors.HexColor("#FFFF00")
 _C_GREY = colors.HexColor("#808080")
 
 
+_XL_CHAR = 1.22  # one Arial-12 character in Excel column-width units
+_XL_SCREEN_WIDTH = 200  # column widths that fill a full-HD screen at 100% zoom
+
+
+def _xl_wrapped_lines(text: str, width: float) -> int:
+    """How many lines Excel needs for this text in a column of this width."""
+    cap = max(1.0, (width - 1.5) / _XL_CHAR)
+    total = 0
+    for line in str(text).splitlines() or [""]:
+        n, cur = 1, 0
+        for word in line.split():
+            if cur and cur + 1 + len(word) > cap:
+                n, cur = n + 1, len(word)
+            else:
+                cur += (1 if cur else 0) + len(word)
+        total += n
+    return total
+
+
 def _build_xlsx(client: dict, columns: list[tuple[str, str]], rows: list[dict]) -> bytes:
     wb = Workbook()
     ws = wb.active
@@ -1150,6 +1169,25 @@ def _build_xlsx(client: dict, columns: list[tuple[str, str]], rows: list[dict]) 
     }
     widths = [min_widths.get(key, 14) for key, _ in columns]
     widths[0] = max(widths[0], 12.5)  # the report date sits in the first column
+
+    # Wide enough that no word or date breaks (Arial 12 runs wider than Excel's width
+    # unit), then the rest of a full screen is shared out — most of it to Comments.
+    def _longest_word(text) -> int:
+        return max((len(w) for w in str(text or "").split()), default=0)
+    for i, (key, label) in enumerate(columns):
+        need = max([_longest_word(label) * 1.12] + [_longest_word(r.get(key, "")) for r in rows]) * _XL_CHAR + 2.5
+        widths[i] = round(max(widths[i], need), 1)
+    if sum(widths) < _XL_SCREEN_WIDTH:
+        extra = _XL_SCREEN_WIDTH - sum(widths)
+        ci = next((i for i, (k, _) in enumerate(columns) if k == "comments"), None)
+        if ci is not None:
+            widths[ci] += extra * 0.4
+            extra *= 0.6
+        others = [i for i in range(len(widths)) if i != ci]
+        base = sum(widths[i] for i in others) or 1
+        for i in others:
+            widths[i] += extra * widths[i] / base
+        widths = [round(w, 1) for w in widths]
 
     if logo_path and os.path.exists(logo_path):
         try:
@@ -1200,11 +1238,13 @@ def _build_xlsx(client: dict, columns: list[tuple[str, str]], rows: list[dict]) 
 
     # Row 2: SHIPPING REPORT blue banner
     ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=ncols)
-    cell = ws.cell(row=2, column=1, value="SHIPPING REPORT")
+    # The Patuma header picture already carries the "SHIPPING REPORT" bar, so under it
+    # this row is just the blue band (as on the original reports)
+    cell = ws.cell(row=2, column=1, value=None if company_key == "Patuma" else "SHIPPING REPORT")
     cell.fill = PatternFill("solid", fgColor="0000D4")
     cell.font = Font(bold=True, size=16, color="00ABEA", name="Arial")
     cell.alignment = Alignment(horizontal="center", vertical="center")
-    ws.row_dimensions[2].height = 26
+    ws.row_dimensions[2].height = 12 if company_key == "Patuma" else 26
 
     # Row 3: Date + teal spacer + Client: + name
     client_label_col = max(2, ncols - 3)
@@ -1253,15 +1293,7 @@ def _build_xlsx(client: dict, columns: list[tuple[str, str]], rows: list[dict]) 
         c.alignment = header_align
         c.border = header_border
     # Tall enough for the longest heading once it wraps (e.g. "Original Invoices & Phyto's Received")
-    def _lines(text: str, width: float) -> int:
-        n, cur = 1, 0
-        for word in str(text).split():
-            if cur and cur + 1 + len(word) > width * 0.85:
-                n, cur = n + 1, len(word)
-            else:
-                cur += (1 if cur else 0) + len(word)
-        return n
-    ws.row_dimensions[4].height = max(42, 14 * max(_lines(label, w) for (_, label), w in zip(columns, widths)) + 6)
+    ws.row_dimensions[4].height = max(42, 16 * max(_xl_wrapped_lines(label, w / 1.12) for (_, label), w in zip(columns, widths)) + 8)
 
     # Data rows
     body_font = Font(color="000000", size=12, name="Arial")
@@ -1275,11 +1307,8 @@ def _build_xlsx(client: dict, columns: list[tuple[str, str]], rows: list[dict]) 
             c.font = body_font
             c.alignment = body_align
             if value:
-                lines = value.splitlines()
-                colw = widths[col_index - 1]
-                wrapped = sum(max(1, -(-len(line) // max(colw - 2, 1))) for line in lines)
-                max_lines = max(max_lines, wrapped)
-        ws.row_dimensions[row_index].height = max(48, min(200, 20 * max_lines + 10))
+                max_lines = max(max_lines, _xl_wrapped_lines(value, widths[col_index - 1]))
+        ws.row_dimensions[row_index].height = max(48, min(400, 16 * max_lines + 14))
 
     for i, w in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(i)].width = w
