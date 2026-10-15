@@ -96,6 +96,8 @@ class Client(BaseModel):
     notes: Optional[str] = None
     default_pod: Optional[str] = None  # Port of discharge most shipments for this client use
     pinned: bool = False
+    pin_order: Optional[int] = None  # position among pinned clients (lower = higher up)
+    flagged: bool = False  # priority client — surfaced on the dashboard
     email_to: Optional[str] = None  # recipient(s) for the status-report email draft, comma-separated
     email_cc: Optional[str] = None  # cc'd address(es), comma-separated
     email_greeting: Optional[str] = None  # e.g. "Roland and Jessica" for "Dear ..."
@@ -122,6 +124,7 @@ class ClientUpdate(BaseModel):
     notes: Optional[str] = None
     default_pod: Optional[str] = None
     pinned: Optional[bool] = None
+    flagged: Optional[bool] = None
     email_to: Optional[str] = None
     email_cc: Optional[str] = None
     email_greeting: Optional[str] = None
@@ -157,6 +160,7 @@ class Shipment(BaseModel):
     extra_vessels: List[dict] = Field(default_factory=list)  # legs beyond the 2nd: [{id, name, planned_etd, sob_date, state, delay_days}]
     final_destination: Optional[str] = None
     comments: str = ""
+    comment_note: str = ""  # typed by ops; appended after the auto-generated status comment
     hbill_released: Optional[bool] = None
     expected_freight_rate: Optional[str] = None
     copy_docs_status: Optional[str] = None
@@ -190,6 +194,7 @@ class ShipmentCreate(BaseModel):
     extra_vessels: Optional[List[dict]] = None
     final_destination: Optional[str] = None
     comments: str = ""
+    comment_note: str = ""
     hbill_released: Optional[bool] = None
     expected_freight_rate: Optional[str] = None
     copy_docs_status: Optional[str] = None
@@ -217,6 +222,7 @@ class ShipmentUpdate(BaseModel):
     extra_vessels: Optional[List[dict]] = None
     final_destination: Optional[str] = None
     comments: Optional[str] = None
+    comment_note: Optional[str] = None
     hbill_released: Optional[bool] = None
     expected_freight_rate: Optional[str] = None
     copy_docs_status: Optional[str] = None
@@ -278,6 +284,7 @@ async def list_clients():
 @api_router.post("/clients", response_model=Client)
 async def create_client(payload: ClientCreate):
     optional_columns = dict(DEFAULT_OPTIONAL_COLUMNS)
+    optional_columns.update((await _get_settings()).get("default_columns") or {})
     if payload.optional_columns:
         optional_columns.update({k: bool(v) for k, v in payload.optional_columns.items() if k in DEFAULT_OPTIONAL_COLUMNS})
     company = payload.company if payload.company in COMPANIES else "Patuma"
@@ -313,6 +320,14 @@ async def update_client(client_id: str, payload: ClientUpdate):
         updates["company"] = payload.company
     if payload.pinned is not None:
         updates["pinned"] = payload.pinned
+        if payload.pinned and not existing.get("pinned"):
+            # Newly pinned clients go to the bottom of the pinned list
+            last = await db.clients.find({"pinned": True}, {"_id": 0, "pin_order": 1}).to_list(1000)
+            updates["pin_order"] = max([c.get("pin_order") or 0 for c in last] + [0]) + 1
+        elif not payload.pinned:
+            updates["pin_order"] = None
+    if payload.flagged is not None:
+        updates["flagged"] = payload.flagged
     if payload.optional_columns is not None:
         merged = dict(existing.get("optional_columns") or DEFAULT_OPTIONAL_COLUMNS)
         for k, v in payload.optional_columns.items():
@@ -322,6 +337,18 @@ async def update_client(client_id: str, payload: ClientUpdate):
     if updates:
         await db.clients.update_one({"id": client_id}, {"$set": updates})
     return await _get_client(client_id)
+
+
+class PinOrderPayload(BaseModel):
+    ids: List[str]
+
+
+@api_router.post("/clients/pin-order")
+async def set_pin_order(payload: PinOrderPayload):
+    """Reorder the pinned clients — ids in their new top-to-bottom order."""
+    for i, cid in enumerate(payload.ids):
+        await db.clients.update_one({"id": cid}, {"$set": {"pin_order": i + 1}})
+    return {"ok": True}
 
 
 @api_router.get("/companies")
@@ -480,6 +507,10 @@ def _regenerate_comment(ship: dict) -> str:
         parts.append("Awaiting confirmation of departure of next vessel.")
     else:
         parts.append("Awaiting confirmation of departure.")
+
+    note = (ship.get("comment_note") or "").strip()
+    if note:
+        parts.append(note)
 
     body = " ".join(p for p in parts if p)
     return prefix + body if body else prefix.rstrip()
@@ -732,6 +763,14 @@ async def ack_cargo_report(shipment_id: str):
     r = _reminder_for_shipment(existing, date.today())
     target = r["target_date"] if r else None
     await db.shipments.update_one({"id": shipment_id}, {"$set": {"cargo_report_ack_date": target, "updated_at": _now_iso()}})
+    return {"ok": True}
+
+
+@api_router.post("/shipments/{shipment_id}/unack-cargo-report")
+async def unack_cargo_report(shipment_id: str):
+    result = await db.shipments.update_one({"id": shipment_id}, {"$set": {"cargo_report_ack_date": None}})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Shipment not found")
     return {"ok": True}
 
 
@@ -1925,6 +1964,140 @@ async def export_pdf_modern(client_id: str):
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ---------- Settings ----------
+DEFAULT_QUICK_COMMENTS = [
+    "Planned ETD ",
+    "Vessel delayed slightly. Now planned ETD ",
+    "Vessel changed by S/Line. Now planned ETD ",
+    "Awaiting confirmation of departure.",
+    "Shipped on board ",
+    "H/bill released by supplier.",
+    "H/bill NOT released by supplier.",
+    "ANF received. Docs to Ops.",
+]
+EXPORT_FORMATS = ["PDF", "Excel", "PDF + Excel"]
+
+
+class SettingsUpdate(BaseModel):
+    default_columns: Optional[dict] = None
+    export_format: Optional[str] = None
+    quick_comments: Optional[List[str]] = None
+
+
+async def _get_settings() -> dict:
+    doc = await db.settings.find_one({"id": "global"}, _proj()) or {}
+    return {
+        "default_columns": {**DEFAULT_OPTIONAL_COLUMNS, **(doc.get("default_columns") or {})},
+        "export_format": doc.get("export_format") or "PDF + Excel",
+        "quick_comments": doc.get("quick_comments") if doc.get("quick_comments") is not None else list(DEFAULT_QUICK_COMMENTS),
+    }
+
+
+@api_router.get("/settings")
+async def get_settings():
+    return await _get_settings()
+
+
+@api_router.put("/settings")
+async def update_settings(payload: SettingsUpdate):
+    updates: dict[str, Any] = {}
+    if payload.default_columns is not None:
+        updates["default_columns"] = {k: bool(v) for k, v in payload.default_columns.items() if k in DEFAULT_OPTIONAL_COLUMNS}
+    if payload.export_format is not None:
+        if payload.export_format not in EXPORT_FORMATS:
+            raise HTTPException(status_code=400, detail="Unknown export format")
+        updates["export_format"] = payload.export_format
+    if payload.quick_comments is not None:
+        updates["quick_comments"] = [c for c in payload.quick_comments if (c or "").strip()]
+    if updates:
+        await db.settings.update_one({"id": "global"}, {"$set": updates}, upsert=True)
+    return await _get_settings()
+
+
+# ---------- Daily report log ----------
+# One entry per client per day once the status report has been sent. The date and
+# time come from the browser so "today" always matches the office's local day.
+class ReportSentPayload(BaseModel):
+    date: str  # YYYY-MM-DD
+    time: str  # HH:MM
+
+
+@api_router.get("/report-log")
+async def report_log(date: str):
+    rows = await db.report_log.find({"date": date}, _proj()).to_list(1000)
+    return {r["client_id"]: r["time"] for r in rows}
+
+
+@api_router.post("/clients/{client_id}/report-sent")
+async def mark_report_sent(client_id: str, payload: ReportSentPayload):
+    await _get_client(client_id)
+    await db.report_log.update_one(
+        {"client_id": client_id, "date": payload.date},
+        {"$set": {"client_id": client_id, "date": payload.date, "time": payload.time, "sent_at": _now_iso()}},
+        upsert=True,
+    )
+    return {"ok": True}
+
+
+# ---------- Quotes & pro forma invoices ----------
+# The builder owns the document shape (details, shipment, ROE, charge lines,
+# EasyClear ticks); the API stores it as-is and only manages ids and numbering.
+DOC_PREFIX = {"quote": "Q", "pfi": "PF"}
+
+
+async def _next_doc_number(doc_type: str) -> str:
+    prefix = f"{DOC_PREFIX.get(doc_type, 'Q')}-{datetime.now().strftime('%y')}-"
+    docs = await db.documents.find({"no": {"$regex": f"^{re.escape(prefix)}"}}, {"_id": 0, "no": 1}).to_list(10000)
+    highest = 0
+    for d in docs:
+        try:
+            highest = max(highest, int(d["no"][len(prefix):]))
+        except (ValueError, KeyError):
+            continue
+    return f"{prefix}{highest + 1:03d}"
+
+
+@api_router.get("/documents")
+async def list_documents():
+    return await db.documents.find({}, _proj()).sort("date", -1).to_list(5000)
+
+
+@api_router.get("/documents/next-number")
+async def next_document_number(type: str = "quote"):
+    return {"no": await _next_doc_number(type)}
+
+
+@api_router.post("/documents")
+async def create_document(payload: dict):
+    doc = {k: v for k, v in payload.items() if k != "_id"}
+    doc["id"] = str(uuid.uuid4())
+    doc["type"] = doc.get("type") if doc.get("type") in DOC_PREFIX else "quote"
+    if not (doc.get("no") or "").strip():
+        doc["no"] = await _next_doc_number(doc["type"])
+    doc["created_at"] = doc["updated_at"] = _now_iso()
+    await db.documents.insert_one(dict(doc))
+    return doc
+
+
+@api_router.put("/documents/{doc_id}")
+async def update_document(doc_id: str, payload: dict):
+    existing = await db.documents.find_one({"id": doc_id}, _proj())
+    if not existing:
+        raise HTTPException(status_code=404, detail="Document not found")
+    doc = {k: v for k, v in payload.items() if k not in ("_id", "id", "created_at")}
+    doc["updated_at"] = _now_iso()
+    await db.documents.update_one({"id": doc_id}, {"$set": doc})
+    return await db.documents.find_one({"id": doc_id}, _proj())
+
+
+@api_router.delete("/documents/{doc_id}")
+async def delete_document(doc_id: str):
+    result = await db.documents.delete_one({"id": doc_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return {"ok": True}
 
 
 @api_router.get("/")
