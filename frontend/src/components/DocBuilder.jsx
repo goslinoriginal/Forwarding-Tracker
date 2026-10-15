@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "@/lib/api";
-import { clientEmail, composeEmail, roeDay, roeFor, shipmentLegs, useClients, useRefresh, useRoe, useShipments } from "@/lib/data";
+import { clientEmail, clientEmailLabel, composeEmail, roeDay, roeFor, shipmentLegs, useClients, useRefresh, useRoe, useShipments } from "@/lib/data";
 import {
   DEF_OF, ENTITIES, GROUPS, INCO, Ln, PFI_TERMS, QUOTE_TERMS, SYM, TPL, calc, dotDecimal, ecDesc, equipmentText, fmt, money, num, parseOrder,
 } from "@/lib/billingCalc";
@@ -243,7 +243,7 @@ export default function DocBuilder({ initial, onClose }) {
     if (!rows.length) return null;
     return { g, label: `Total ${label.toLowerCase()}`, rows, sub: fmt(rows.reduce((a, l) => a + l.zar, 0)), vat: fmt(rows.reduce((a, l) => a + l.vatAmt, 0)) };
   }).filter(Boolean);
-  const party = [[isQ ? "To" : "Client", client.name || "—"], ["Attention", dc.att], ["Date", dmy(dc.date)], [isQ ? "Valid until" : "Payment due", dmy(dc.until)], ["Ref no", dc.ref], ["File", dc.file], ["Prepared by", dc.prep], ["Email", clientEmail(client)]].filter((p) => p[1]);
+  const party = [[isQ ? "To" : "Client", client.name || "—"], ["Attention", dc.att], ["Date", dmy(dc.date)], [isQ ? "Valid until" : "Payment due", dmy(dc.until)], ["Ref no", dc.ref], ["File", dc.file], ["Prepared by", dc.prep], ["Email", clientEmailLabel(client)]].filter((p) => p[1]);
   const shipInfo = [["Containers", dc.equipment], ["Total weight", dc.kgs && `${dc.kgs} KGS`], ["Total volume", dc.cbm && `${dc.cbm} CBM`], ["B/L no.", dc.bl], ["Commodity", dc.commodity], ["ETD / POL", dc.pol], ["ETA / POD", dc.pod], ["Via", dc.via], ["Transit time", dc.transit], ["Vessel", dc.vessel], ["SOB date", dmy(dc.sob)], ["ETA", dmy(dc.eta)], ["Frequency", dc.freq], ["Terms", dc.inco], ["R.O.E.", `USD ${roeTxt(c.roe.USD)}${usesEur ? ` · EUR ${roeTxt(c.roe.EUR)}` : ""}`]].filter((p) => p[1]);
   // EasyClear wants these five, in this order
   const ecShip = [

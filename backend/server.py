@@ -106,6 +106,8 @@ class Client(BaseModel):
     email_to: Optional[str] = None  # recipient(s) for the status-report email draft, comma-separated
     email_cc: Optional[str] = None  # cc'd address(es), comma-separated
     email_greeting: Optional[str] = None  # e.g. "Roland and Jessica" for "Dear ..."
+    email_subject: Optional[str] = None  # custom status-report subject; blank uses the default
+    email_body: Optional[str] = None  # custom status-report message; blank uses the default
     optional_columns: dict = Field(default_factory=lambda: dict(DEFAULT_OPTIONAL_COLUMNS))
     created_at: str = Field(default_factory=_now_iso)
 
@@ -119,6 +121,8 @@ class ClientCreate(BaseModel):
     email_to: Optional[str] = None
     email_cc: Optional[str] = None
     email_greeting: Optional[str] = None
+    email_subject: Optional[str] = None
+    email_body: Optional[str] = None
     optional_columns: Optional[dict] = None
 
 
@@ -135,6 +139,8 @@ class ClientUpdate(BaseModel):
     email_to: Optional[str] = None
     email_cc: Optional[str] = None
     email_greeting: Optional[str] = None
+    email_subject: Optional[str] = None
+    email_body: Optional[str] = None
     optional_columns: Optional[dict] = None
 
 
@@ -343,7 +349,7 @@ async def get_client(client_id: str):
 async def update_client(client_id: str, payload: ClientUpdate):
     existing = await _get_client(client_id)
     updates: dict[str, Any] = {}
-    for field in ["name", "contact_email", "notes", "default_pod", "email_to", "email_cc", "email_greeting"]:
+    for field in ["name", "contact_email", "notes", "default_pod", "email_to", "email_cc", "email_greeting", "email_subject", "email_body"]:
         value = getattr(payload, field)
         if value is not None:
             updates[field] = value
@@ -2158,6 +2164,30 @@ class SettingsUpdate(BaseModel):
     default_columns: Optional[dict] = None
     export_format: Optional[str] = None
     quick_comments: Optional[List[str]] = None
+    email_default_to: Optional[str] = None
+    email_default_cc: Optional[str] = None
+    email_default_subject: Optional[str] = None
+    email_default_body: Optional[str] = None
+
+
+# Added to every client's status-report email; the client's own addresses go in front.
+DEFAULT_EMAIL_TO = (
+    "Clearfreight (Pty) Ltd - Dean Chetty <dean@clearfreight.co.za>; "
+    "Clearfreight (Pty) Ltd - Leon Menhennet <leonm@clearfreight.co.za>; "
+    "Clearfreight (Pty) Ltd - Sorisha Chetty <durban@clearfreight.co.za>"
+)
+DEFAULT_EMAIL_CC = (
+    "Clearfreight (Pty) Ltd - Maree Prinsloo <maree@clearfreight.co.za>; "
+    "Clearfreight (Pty) Ltd - Joey Naidoo <joey@clearfreight.co.za>; "
+    "Clearfreight (Pty) Ltd - Andre Prinsloo <andrep@clearfreight.co.za>; "
+    "Clearfreight (Pty) Ltd - Richard Whitfeld <rwhitfeld@clearfreight.co.za>"
+)
+DEFAULT_EMAIL_SUBJECT = "Status Report - {client}"
+DEFAULT_EMAIL_BODY = "Dear {name},\n\nPlease see attached Status Report for your pending shipments.\n\nThanks."
+_EMAIL_DEFAULTS = {
+    "email_default_to": DEFAULT_EMAIL_TO, "email_default_cc": DEFAULT_EMAIL_CC,
+    "email_default_subject": DEFAULT_EMAIL_SUBJECT, "email_default_body": DEFAULT_EMAIL_BODY,
+}
 
 
 async def _get_settings() -> dict:
@@ -2166,6 +2196,7 @@ async def _get_settings() -> dict:
         "default_columns": {**DEFAULT_OPTIONAL_COLUMNS, **(doc.get("default_columns") or {})},
         "export_format": doc.get("export_format") or "PDF + Excel",
         "quick_comments": doc.get("quick_comments") if doc.get("quick_comments") is not None else list(DEFAULT_QUICK_COMMENTS),
+        **{k: doc[k] if doc.get(k) is not None else v for k, v in _EMAIL_DEFAULTS.items()},
     }
 
 
@@ -2224,6 +2255,9 @@ async def update_settings(payload: SettingsUpdate):
         updates["export_format"] = payload.export_format
     if payload.quick_comments is not None:
         updates["quick_comments"] = [c for c in payload.quick_comments if (c or "").strip()]
+    for k in _EMAIL_DEFAULTS:
+        if getattr(payload, k) is not None:
+            updates[k] = getattr(payload, k)
     if updates:
         await db.settings.update_one({"id": "global"}, {"$set": updates}, upsert=True)
     return await _get_settings()

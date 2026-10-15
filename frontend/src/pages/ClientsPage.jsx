@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, OPTIONAL_COLUMNS } from "@/lib/api";
-import { clientEmail, displayStatus, pinSort, useClients, useRefresh, useReportLog, useShipments } from "@/lib/data";
+import { clientEmail, clientEmailLabel, displayStatus, pinSort, useClients, useRefresh, useReportLog, useShipments } from "@/lib/data";
 import { COMPANY_HUE, Pill, Seg, useToast } from "@/lib/ui";
 import ClientModal from "@/components/ClientModal";
 import ImportModal from "@/components/ImportModal";
@@ -146,7 +146,7 @@ export default function ClientsPage() {
               >
                 <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
                   <span style={{ fontSize: 14, fontWeight: 600 }}>{c.name}</span>
-                  <span className="oo-ellipsis" style={{ fontSize: 12, color: "var(--mute)" }}>{clientEmail(c) || "—"}</span>
+                  <span className="oo-ellipsis" style={{ fontSize: 12, color: "var(--mute)" }}>{clientEmailLabel(c) || "—"}</span>
                 </div>
                 <Pill hue={COMPANY_HUE[c.company]}>{c.company}</Pill>
                 <span className="mono r">{countFor(c.id)}</span>

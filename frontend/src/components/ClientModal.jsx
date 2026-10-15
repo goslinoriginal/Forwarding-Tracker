@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api } from "@/lib/api";
+import { parseRecipients, reportEmail, useSettings } from "@/lib/data";
 import { Modal, Seg, Toggle, useToast } from "@/lib/ui";
 
 const ENTITIES = [{ value: "Patuma", label: "Patuma" }, { value: "Clearfreight", label: "Clearfreight" }];
@@ -11,6 +12,7 @@ export default function ClientModal({ client, onClose, onSaved, onDeleted }) {
   const [f, setF] = useState(() => ({
     name: client?.name || "", contact_email: client?.contact_email || "", company: client?.company || "Patuma",
     email_to: client?.email_to || "", email_cc: client?.email_cc || "", email_greeting: client?.email_greeting || "",
+    email_subject: client?.email_subject || "", email_body: client?.email_body || "",
     default_pod: client?.default_pod || "", notes: client?.notes || "",
     internal: !!client?.internal,
     // One "Client = Handover party" per line
@@ -18,6 +20,11 @@ export default function ClientModal({ client, onClose, onSaved, onDeleted }) {
   }));
   const isHandovers = client?.report_layout === "handovers";
   const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState(false);
+  const { data: settings } = useSettings();
+  const nTo = parseRecipients(f.email_to).length;
+  const nCc = parseRecipients(f.email_cc).length;
+  const mail = reportEmail({ ...client, ...f }, settings);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
 
   const save = async () => {
@@ -78,12 +85,39 @@ export default function ClientModal({ client, onClose, onSaved, onDeleted }) {
       </div>
       {editing && (
         <>
+          <div className="oo-field" style={{ gap: 10 }}>
+            <span style={{ fontSize: 13, color: "var(--ink)", fontWeight: 500 }}>Status report email</span>
+            <span className="oo-sub" style={{ fontSize: 12 }}>Only the client's addresses — the Clearfreight To and CC from Settings are added automatically. Paste straight from Outlook; separate with ; , or new lines.</span>
+          </div>
+          <label className="oo-field">
+            <span>Client To {nTo ? `· ${nTo} address${nTo === 1 ? "" : "es"}` : ""}</span>
+            <textarea className="oo-input" rows={3} style={{ resize: "vertical", fontSize: 13 }} value={f.email_to} onChange={set("email_to")} placeholder={"paul@tsicom.co.za; Jane Smith <jane@tsicom.co.za>"} data-testid="client-email-to" />
+          </label>
+          <label className="oo-field">
+            <span>Client CC (optional) {nCc ? `· ${nCc} address${nCc === 1 ? "" : "es"}` : ""}</span>
+            <textarea className="oo-input" rows={2} style={{ resize: "vertical", fontSize: 13 }} value={f.email_cc} onChange={set("email_cc")} />
+          </label>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <label className="oo-field"><span>Status report email · To</span><input className="oo-input" value={f.email_to} onChange={set("email_to")} placeholder="a@client.com, b@client.com" /></label>
-            <label className="oo-field"><span>CC</span><input className="oo-input" value={f.email_cc} onChange={set("email_cc")} /></label>
-            <label className="oo-field"><span>Greeting name(s)</span><input className="oo-input" value={f.email_greeting} onChange={set("email_greeting")} placeholder="e.g. Roland and Jessica" /></label>
+            <label className="oo-field"><span>Greeting name(s) · {"{name}"}</span><input className="oo-input" value={f.email_greeting} onChange={set("email_greeting")} placeholder="e.g. Roland and Jessica" /></label>
             <label className="oo-field"><span>Default port of discharge</span><input className="oo-input" value={f.default_pod} onChange={set("default_pod")} placeholder="Durban" /></label>
           </div>
+          <label className="oo-field">
+            <span>Subject — blank uses the default</span>
+            <input className="oo-input" value={f.email_subject} onChange={set("email_subject")} placeholder={settings?.email_default_subject || "Status Report - {client}"} />
+          </label>
+          <label className="oo-field">
+            <span>Message — blank uses the default · {"{name}"} = greeting, {"{client}"} = client name</span>
+            <textarea className="oo-input" rows={5} style={{ resize: "vertical", fontSize: 13 }} value={f.email_body} onChange={set("email_body")} placeholder={settings?.email_default_body || ""} data-testid="client-email-body" />
+          </label>
+          <button type="button" className="oo-link" style={{ alignSelf: "flex-start" }} onClick={() => setPreview(!preview)}>{preview ? "Hide email preview" : "Preview the email"}</button>
+          {preview && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "12px 14px", borderRadius: 12, background: "var(--sub)", fontSize: 12, lineHeight: 1.5 }} data-testid="email-preview">
+              <span><b>To:</b> {mail.to.map((r) => r.email).join("; ") || "—"}</span>
+              <span><b>CC:</b> {mail.cc.map((r) => r.email).join("; ") || "—"}</span>
+              <span><b>Subject:</b> {mail.subject}</span>
+              <span style={{ whiteSpace: "pre-wrap", paddingTop: 6, borderTop: "1px solid var(--line2)" }}>{mail.body}</span>
+            </div>
+          )}
           <label className="oo-field"><span>Notes</span><textarea className="oo-input" rows={3} value={f.notes} onChange={set("notes")} /></label>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
             <div className="oo-card-title">

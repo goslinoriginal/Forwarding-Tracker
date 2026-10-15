@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api, OPTIONAL_COLUMNS } from "@/lib/api";
-import { getMailApp, setMailApp, useClients, useRefresh, useRoe, useSettings } from "@/lib/data";
+import { getMailApp, parseRecipients, setMailApp, useClients, useRefresh, useRoe, useSettings } from "@/lib/data";
 import { ENTITIES } from "@/lib/billingCalc";
 import { Seg, Toggle, dmy, todayIso, useChip, useToast } from "@/lib/ui";
 import RoeModal from "@/components/RoeModal";
@@ -18,6 +18,12 @@ export default function SettingsPage() {
   const [roeEdit, setRoeEdit] = useState(null);
   const [roeAll, setRoeAll] = useState(false);
   const [mailApp, setMail] = useState(getMailApp);
+  const [mailDraft, setMailDraft] = useState(null); // edits to the default recipients / message
+  const EMAIL_KEYS = ["email_default_to", "email_default_cc", "email_default_subject", "email_default_body"];
+  const mailVals = mailDraft || Object.fromEntries(EMAIL_KEYS.map((k) => [k, settings?.[k] || ""]));
+  const setMailVal = (k) => (e) => setMailDraft({ ...mailVals, [k]: e.target.value });
+  const saveMail = async () => { await update(mailDraft); setMailDraft(null); toast("Email defaults saved"); };
+  const count = (t) => { const n = parseRecipients(t).length; return n ? ` · ${n} address${n === 1 ? "" : "es"}` : ""; };
 
   const update = async (patch) => {
     try {
@@ -63,6 +69,20 @@ export default function SettingsPage() {
             ? "Opens a new email in a browser tab at outlook.office.com — the mailbox you're already signed into, so there's no sign-in screen."
             : "Opens a new email in Outlook (classic). If the new Outlook opens instead (or asks you to sign in), set it once in Windows: Settings → Apps → Default apps → search “mailto” → choose Outlook (classic)."}
         </span>
+        <div className="oo-card-title" style={{ paddingTop: 10, borderTop: "1px solid var(--line2)" }}>
+          <h2 style={{ fontSize: 16 }}>Added to every status report email</h2>
+          <span className="oo-sub">The client's own addresses (in their profile) go first, then these.</span>
+        </div>
+        <label className="oo-field"><span>To{count(mailVals.email_default_to)}</span><textarea className="oo-input" rows={3} style={{ resize: "vertical", fontSize: 13 }} value={mailVals.email_default_to} onChange={setMailVal("email_default_to")} data-testid="default-to" /></label>
+        <label className="oo-field"><span>CC{count(mailVals.email_default_cc)}</span><textarea className="oo-input" rows={4} style={{ resize: "vertical", fontSize: 13 }} value={mailVals.email_default_cc} onChange={setMailVal("email_default_cc")} /></label>
+        <label className="oo-field"><span>Default subject · {"{client}"} = client name</span><input className="oo-input" value={mailVals.email_default_subject} onChange={setMailVal("email_default_subject")} /></label>
+        <label className="oo-field"><span>Default message · {"{name}"} = greeting name(s) from the client's profile</span><textarea className="oo-input" rows={5} style={{ resize: "vertical", fontSize: 13 }} value={mailVals.email_default_body} onChange={setMailVal("email_default_body")} /></label>
+        {mailDraft && (
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button type="button" className="oo-btn sm" onClick={() => setMailDraft(null)}>Cancel</button>
+            <button type="button" className="oo-btn primary sm" onClick={saveMail} data-testid="save-email-defaults">Save email defaults</button>
+          </div>
+        )}
       </section>
 
       <section className="oo-set" style={{ gap: 12 }}>

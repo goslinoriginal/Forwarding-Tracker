@@ -100,7 +100,6 @@ export async function fetchEndClients(clientId) {
   return res.ok ? (await res.json()).end_clients : [];
 }
 
-/** Opens the client's pre-filled status-report email in the mail app. */
 /* Where "Send" opens the new email. Saved per computer.
    mailto – the computer's default mail app: Outlook (classic), once it's the mailto default in Windows (default)
    owa    – a new email in Outlook on the web */
@@ -108,38 +107,67 @@ const MAIL_KEY = "oceanops.mailApp";
 export const getMailApp = () => { try { return localStorage.getItem(MAIL_KEY) || "mailto"; } catch { return "mailto"; } };
 export const setMailApp = (v) => { try { localStorage.setItem(MAIL_KEY, v); } catch {} };
 
-const recipients = (list) => String(list || "").split(/[;,]/).map((x) => x.trim()).filter(Boolean);
+/** Every address in text pasted from Outlook: "Name <a@b.com>; 'c@d.com', e@f.com" → [{ name, email }]. */
+export function parseRecipients(text) {
+  const out = [];
+  const seen = new Set();
+  const re = /(?:([^;,<>\n]*?)\s*<\s*([^<>\s;,]+@[^<>\s;,]+)\s*>)|([^\s;,<>"']+@[^\s;,<>"']+)/g;
+  let m;
+  while ((m = re.exec(String(text || "")))) {
+    const email = (m[2] || m[3]).replace(/^['"]+|['".]+$/g, "");
+    const key = email.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ name: (m[1] || "").replace(/^['"\s]+|['"\s]+$/g, ""), email });
+  }
+  return out;
+}
+const mergeRecipients = (...lists) => parseRecipients(lists.filter(Boolean).join(";"));
+const MAX_MAILTO = 2000; // Windows won't pass longer mailto links to Outlook
 
 /** Opens a ready-to-send email: To, CC, subject and body filled in. */
 export function composeEmail({ to, cc, subject, body }) {
-  const toL = recipients(to);
-  const ccL = recipients(cc);
+  const toL = parseRecipients(to).map((r) => r.email);
+  const ccL = parseRecipients(cc).filter((r) => !toL.includes(r.email)).map((r) => r.email);
   if (getMailApp() === "owa") {
     const q = [["to", toL.join(";")], ["cc", ccL.join(";")], ["subject", subject], ["body", body]]
       .filter(([, v]) => v)
       .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
       .join("&");
     window.open(`https://outlook.office.com/mail/deeplink/compose?${q}`, "_blank", "noopener");
-    return;
+    return { ok: true };
   }
-  const params = new URLSearchParams();
-  if (ccL.length) params.set("cc", ccL.join(";"));
-  if (subject) params.set("subject", subject);
-  if (body) params.set("body", body);
-  window.location.href = `mailto:${toL.map(encodeURIComponent).join(";")}?${params.toString().replace(/\+/g, "%20")}`;
+  const build = (b) => {
+    const params = [["cc", ccL.join(";")], ["subject", subject], ["body", b]].filter(([, v]) => v).map(([k, v]) => `${k}=${encodeURIComponent(v)}`);
+    return `mailto:${toL.join(";")}?${params.join("&")}`;
+  };
+  let url = build(body);
+  let trimmed = false;
+  if (url.length > MAX_MAILTO) { url = build(""); trimmed = true; } // a very long message: paste it in yourself
+  window.location.href = url;
+  return { ok: true, trimmed };
 }
 
-export function openReportEmail(client) {
-  const to = (client.email_to || client.contact_email || "").trim();
-  if (!to) return false;
-  const cc = (client.email_cc || "").trim();
-  const greetingName = (client.email_greeting || client.name || "").trim();
-  composeEmail({
-    to, cc,
-    subject: `Status Report - ${client.name}`,
-    body: `Dear ${greetingName},\n\nPlease see attached Status Report for your pending shipments.\n\nThanks.`,
-  });
-  return true;
+/** Fills {name} and {client} in a subject or message template. */
+export const fillTemplate = (tpl, client) =>
+  String(tpl || "").replace(/\{name\}/gi, (client.email_greeting || client.name || "").trim()).replace(/\{client\}/gi, client.name || "");
+
+/** The status-report email for a client: their own addresses plus the defaults from Settings. */
+export function reportEmail(client, settings) {
+  const s = settings || {};
+  return {
+    to: mergeRecipients(client.email_to || client.contact_email, s.email_default_to),
+    cc: mergeRecipients(client.email_cc, s.email_default_cc),
+    subject: fillTemplate((client.email_subject || "").trim() || s.email_default_subject || "Status Report - {client}", client),
+    body: fillTemplate((client.email_body || "").trim() || s.email_default_body || "Dear {name},\n\nPlease see attached Status Report for your pending shipments.\n\nThanks.", client),
+  };
+}
+
+export function openReportEmail(client, settings) {
+  if (!parseRecipients(client.email_to || client.contact_email).length) return false;
+  const e = reportEmail(client, settings);
+  const fmt = (list) => list.map((r) => (r.name ? `${r.name} <${r.email}>` : r.email)).join("; ");
+  return composeEmail({ to: fmt(e.to), cc: fmt(e.cc), subject: e.subject, body: e.body });
 }
 
 /* ---------- Clients ---------- */
@@ -156,4 +184,10 @@ export function pinSort(clients) {
     .map(([c]) => c);
 }
 
-export const clientEmail = (c) => c.email_to || c.contact_email || "";
+/** The client's own addresses, "a@b.com; c@d.com". */
+export const clientEmail = (c) => parseRecipients(c.email_to || c.contact_email).map((r) => r.email).join("; ");
+/** Short label for lists: first address, plus how many more. */
+export const clientEmailLabel = (c) => {
+  const l = parseRecipients(c.email_to || c.contact_email);
+  return l.length ? `${l[0].email}${l.length > 1 ? ` +${l.length - 1}` : ""}` : "";
+};

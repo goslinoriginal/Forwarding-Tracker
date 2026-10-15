@@ -211,9 +211,9 @@ function ShipmentEditor({ clientId, shipId, onClose }) {
     }
     await api.post(`/clients/${client.id}/report-sent`, { date: todayIso(), time: nowHm() });
     await refresh();
-    const mailed = openReportEmail(client);
+    const mailed = openReportEmail(client, settings);
     toast(
-      (mailed ? `Report ready for ${client.email_to || client.contact_email} — attach the download` : "Report downloaded and marked sent · no report email set for this client")
+      (mailed ? `Email opened — attach the downloaded report${mailed.trimmed ? " · message too long for Outlook, paste it in" : ""}` : "Report downloaded and marked sent · add the client's email addresses in their profile")
       + (saved ? ` · ${saved} edit${saved > 1 ? "s" : ""} saved` : ""),
     );
   });
