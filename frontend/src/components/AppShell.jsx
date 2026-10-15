@@ -2,7 +2,10 @@ import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { roeFor, useRoe } from "@/lib/data";
 import { todayIso } from "@/lib/ui";
-import RoeModal, { skippedToday } from "@/components/RoeModal";
+import { isWorkday } from "@/lib/holidays";
+import RoeModal, { skippedToday, snoozed } from "@/components/RoeModal";
+
+const ROE_ASK_HOUR = 10; // rates usually arrive by 10:00
 
 const NAV = [
   { to: "/", label: "Dashboard", match: (p) => p === "/" },
@@ -17,15 +20,24 @@ export default function AppShell({ children }) {
 
   useEffect(() => { window.scrollTo(0, 0); }, [pathname]);
 
-  // Ask for the day's ROE once, on working days, until it's captured
+  // From 10:00 on working days, ask for the day's ROE until it's captured
   const { data: rates, isSuccess } = useRoe();
-  const today = todayIso();
-  const dow = new Date().getDay();
+  const [today, setToday] = useState(todayIso);
   const todays = roeFor(rates, today);
   const [roeOpen, setRoeOpen] = useState(null);
   useEffect(() => {
-    if (isSuccess && dow !== 0 && dow !== 6 && !rates.some((r) => r.date === today) && !skippedToday(today)) setRoeOpen("daily");
-  }, [isSuccess]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!isSuccess) return undefined;
+    const check = () => {
+      const t = todayIso();
+      setToday(t);
+      if (new Date().getHours() < ROE_ASK_HOUR || !isWorkday(t)) return;
+      if (rates.some((r) => r.date === t) || skippedToday(t) || snoozed()) return;
+      setRoeOpen((o) => o || "daily");
+    };
+    check();
+    const id = setInterval(check, 60000);
+    return () => clearInterval(id);
+  }, [isSuccess, rates]);
 
   return (
     <div className="oo-app">

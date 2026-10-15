@@ -51,7 +51,7 @@ export default function SettingsPage() {
 
       <section className="oo-set" style={{ gap: 12 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap" }}>
-          <div className="oo-card-title"><h2>Rates of exchange</h2><span className="oo-sub">Captured daily and pulled into pro formas: the SOB date's (weekend → next Monday) and the invoice date's.</span></div>
+          <div className="oo-card-title"><h2>Rates of exchange</h2><span className="oo-sub">Captured daily and pulled into pro formas: the SOB date's (a weekend or public holiday uses the next working day) and the invoice date's. You're asked for them from 10:00 each working day.</span></div>
           <button type="button" className="oo-btn sm" onClick={() => setRoeEdit({ day: todayIso(), existing: null })}>+ Add a day</button>
         </div>
         {!rates.length && <span className="oo-sub">No rates captured yet.</span>}

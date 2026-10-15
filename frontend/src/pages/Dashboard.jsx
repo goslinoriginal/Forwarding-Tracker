@@ -116,7 +116,7 @@ export default function Dashboard() {
           <div className="oo-card-head">
             <div className="oo-card-title">
               <h2 className="oo-h2">Cargo reporting due</h2>
-              <span className="oo-sub">Tick once reported and it clears. FCL: 2 days before ETD (2nd vessel if transhipment) · LCL: 10 days before ETA · a weekend moves back to the Friday</span>
+              <span className="oo-sub">Tick once reported and it clears. FCL: 2 days before ETD (2nd vessel if transhipment) · LCL: 10 days before ETA · a weekend or public holiday moves back to the working day before</span>
             </div>
           </div>
           <div style={{ overflowX: "auto" }}>

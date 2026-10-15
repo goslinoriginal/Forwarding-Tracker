@@ -5,6 +5,7 @@ import { clientEmail, roeDay, roeFor, shipmentLegs, useClients, useRefresh, useR
 import {
   DEF_OF, ENTITIES, GROUPS, INCO, Ln, PFI_TERMS, QUOTE_TERMS, SYM, TPL, calc, ecDesc, fmt, money, num, parseOrder,
 } from "@/lib/billingCalc";
+import { offReason } from "@/lib/holidays";
 import { Seg, copyText, dmy, isoPlusDays, useToast } from "@/lib/ui";
 
 /* Full-screen quote / pro forma builder: capture on the left, a live printable
@@ -347,7 +348,7 @@ export default function DocBuilder({ initial, onClose }) {
               return (
                 <div key={label} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", fontSize: 12, color: "var(--ink2)" }}>
                   <span>
-                    {label} {dmy(iso)}{day !== iso ? ` (weekend → Monday ${dmy(day)})` : ""}:{" "}
+                    {label} {dmy(iso)}{day !== iso ? ` (${offReason(iso)} → ${dmy(day)})` : ""}:{" "}
                     {got ? <b className="mono">{[got.usd && `$ ${got.usd}`, got.eur && `€ ${got.eur}`].filter(Boolean).join(" · ")}</b> : <span style={{ color: "var(--amb-fg)" }}>no ROE captured for {dmy(day)}</span>}
                   </span>
                   {typed && (

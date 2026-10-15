@@ -730,9 +730,47 @@ async def update_shipment(shipment_id: str, payload: ShipmentUpdate):
     return doc
 
 
+def _easter(y: int) -> date:
+    a, b, c = y % 19, y // 100, y % 100
+    d, e = b // 4, b % 4
+    g = (8 * b + 13) // 25
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = c // 4, c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 19 * l) // 433
+    month = (h + l - 7 * m + 90) // 25
+    return date(y, month, (h + l - 7 * m + 33 * month + 19) % 32)
+
+
+_HOLIDAY_CACHE: dict = {}
+
+
+def _sa_holidays(y: int) -> dict:
+    """South African public holidays for a year; one on a Sunday moves the day off to the Monday."""
+    if y not in _HOLIDAY_CACHE:
+        fixed = {(1, 1): "New Year's Day", (3, 21): "Human Rights Day", (4, 27): "Freedom Day", (5, 1): "Workers' Day",
+                 (6, 16): "Youth Day", (8, 9): "National Women's Day", (9, 24): "Heritage Day",
+                 (12, 16): "Day of Reconciliation", (12, 25): "Christmas Day", (12, 26): "Day of Goodwill"}
+        out = {}
+        for (m, d), name in fixed.items():
+            day = date(y, m, d)
+            out[day] = name
+            if day.weekday() == 6:
+                out[day + timedelta(days=1)] = f"{name} (observed)"
+        e = _easter(y)
+        out[e - timedelta(days=2)] = "Good Friday"
+        out[e + timedelta(days=1)] = "Family Day"
+        _HOLIDAY_CACHE[y] = out
+    return _HOLIDAY_CACHE[y]
+
+
+def _is_workday(d: date) -> bool:
+    return d.weekday() < 5 and d not in _sa_holidays(d.year)
+
+
 def _workday_on_or_before(d: date) -> date:
-    """We don't work weekends: a Saturday or Sunday falls back to the Friday."""
-    while d.weekday() >= 5:
+    """We don't work weekends or public holidays: those fall back to the working day before."""
+    while not _is_workday(d):
         d -= timedelta(days=1)
     return d
 
@@ -747,7 +785,7 @@ def _workdays_until(today: date, due: date) -> int:
     n, d = 0, today
     while d != due:
         d += timedelta(days=step)
-        if d.weekday() < 5:
+        if _is_workday(d):
             n += step
     if due < today and n == 0:
         n = -1  # e.g. due Friday, looked at on the weekend
@@ -2133,11 +2171,17 @@ async def _get_settings() -> dict:
 
 # ----- Rates of exchange (captured once a day from the boss's rates) -----
 def _roe_day(iso: str) -> str:
-    """A Saturday or Sunday uses the following Monday's ROE."""
+    """A weekend or public holiday uses the next working day's ROE."""
     d = date.fromisoformat(iso)
-    while d.weekday() >= 5:
+    while not _is_workday(d):
         d += timedelta(days=1)
     return d.isoformat()
+
+
+@api_router.get("/holidays")
+async def list_holidays(year: Optional[int] = None):
+    years = [year] if year else [date.today().year - 1, date.today().year, date.today().year + 1]
+    return [{"date": d.isoformat(), "name": n} for y in years for d, n in sorted(_sa_holidays(y).items())]
 
 
 @api_router.get("/roe")
