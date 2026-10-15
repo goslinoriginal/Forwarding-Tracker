@@ -50,7 +50,9 @@ export function displayStatus(s) {
   return s.status || "Planned";
 }
 
-export const statusLabel = (st) => (st === "ANF" ? "ANF received" : st);
+/** "Received" wording: FCL closes on the ANF, LCL on the SOB's. */
+export const receivedLabel = (cargo) => ((cargo || "").toUpperCase() === "LCL" ? "SOB's received" : "ANF received");
+export const statusLabel = (st, cargo) => (st === "ANF" ? receivedLabel(cargo) : st);
 
 /** ETD shown in tables: last leg's ETD for transhipments, TBA when flagged. */
 export function etdText(s) {

@@ -492,18 +492,25 @@ def _regenerate_comment(ship: dict) -> str:
             parts.append(f"ETD TBA{tag}.")
         elif leg.get("planned_etd"):
             etd_txt = _plain_dd_mm(leg["planned_etd"])
+            # "Vessel delayed, slightly." — or "2nd Vessel delayed, slightly." on a transhipment
+            who = f"{_ordinal(leg['index'])} Vessel" if multi else "Vessel"
             if leg["state"] == "delayed":
-                slightly = " slightly" if (leg.get("delay_days") or 0) <= 5 else ""
-                parts.append(f"Vessel delayed{slightly}. Now planned ETD {etd_txt}{tag}.")
+                slightly = ", slightly" if (leg.get("delay_days") or 0) <= 5 else ""
+                parts.append(f"{who} delayed{slightly}. Now planned ETD {etd_txt}{tag}.")
             elif leg["state"] == "changed":
-                parts.append(f"Vessel changed by S/Line. Now planned ETD {etd_txt}{tag}.")
+                parts.append(f"{who} changed by S/Line. Now planned ETD {etd_txt}{tag}.")
             else:
                 parts.append(f"Planned ETD {etd_txt}{tag}.")
 
-    # Awaiting clause — skipped when ops wrote their own "Awaiting ..." note
+    # Awaiting clause — skipped when ops wrote their own "Awaiting ..." note. Once the
+    # shipment is closed off it reads "ANF received" (FCL) / "SOB's received" (LCL) instead.
     is_lcl = (ship.get("cargo_type") or "FCL").upper() == "LCL"
     own_awaiting = bool(re.match(r"\s*awaiting\b", ship.get("comment_note") or "", re.I))
-    if own_awaiting:
+    note_text = (ship.get("comment_note") or "").lower()
+    if ship.get("anf_received"):
+        if "received" not in note_text:
+            parts.append("SOB's received. Docs to Ops." if is_lcl else "ANF received. Docs to Ops.")
+    elif own_awaiting:
         pass
     elif all_sailed:
         parts.append("Awaiting SOB's." if is_lcl else "Awaiting ANF.")
@@ -679,12 +686,6 @@ async def update_shipment(shipment_id: str, payload: ShipmentUpdate):
     merged = {**existing, **updates}
     updates["comments"] = _regenerate_comment(merged)
     updates["status"] = _derive_status(merged)
-    # On ANF-received transition, ensure the ANF phrase is present (survives comment regeneration)
-    if updates.get("anf_received") and not existing.get("anf_received"):
-        if "ANF received" not in (updates["comments"] or ""):
-            base = (updates["comments"] or "").rstrip()
-            sep = "" if not base else (" " if base.endswith(".") else ". ")
-            updates["comments"] = f"{base}{sep}ANF received. Docs to Ops."
     updates["updated_at"] = _now_iso()
     await db.shipments.update_one({"id": shipment_id}, {"$set": updates})
     doc = await db.shipments.find_one({"id": shipment_id}, _proj())

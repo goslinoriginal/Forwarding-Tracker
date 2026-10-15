@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { api, CARRIERS, carrierTrackUrl, clipboardTrackingNumber } from "@/lib/api";
 import {
-  displayStatus, downloadReport, openReportEmail, shipmentLegs, statusLabel,
+  displayStatus, downloadReport, openReportEmail, receivedLabel, shipmentLegs, statusLabel,
   useClients, useRefresh, useReportLog, useSettings, useShipments, useVessels,
 } from "@/lib/data";
 import { STATUS_HUE, Pill, copyText, dmy, nowHm, parseDayInput, todayIso, useToast } from "@/lib/ui";
@@ -165,7 +165,7 @@ function ShipmentEditor({ clientId, shipId, onClose }) {
     const id = await commit(editId);
     await api.patch(`/shipments/${id}`, { anf_received: true });
     await refresh();
-    toast("ANF received — drops off the next report");
+    toast(`${receivedLabel(formOf(editId).cargo_type)} — drops off the next report`);
     goIdx(idx + 1);
   });
 
@@ -245,7 +245,7 @@ function ShipmentEditor({ clientId, shipId, onClose }) {
                   <span className="mono" style={{ fontSize: 13, fontWeight: 600 }}>{f.file_number || (id === NEW_ID ? "New file" : "—")}</span>
                   <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     {(isDirty(id) || id === NEW_ID) && <span style={{ fontSize: 11, color: "var(--amb-fg)" }}>● unsaved</span>}
-                    <Pill hue={STATUS_HUE[st]} size="xs">{st === "ANF" ? "ANF" : st}</Pill>
+                    <Pill hue={STATUS_HUE[st]} size="xs">{st === "ANF" ? (f.cargo_type === "LCL" ? "SOB's" : "ANF") : st}</Pill>
                   </span>
                 </span>
                 <span className="oo-ellipsis" style={{ fontSize: 13, color: "var(--ink2)", width: "100%" }}>{f.supplier || "—"}</span>
@@ -267,7 +267,7 @@ function ShipmentEditor({ clientId, shipId, onClose }) {
                 <h2 style={{ fontSize: 22, fontWeight: 600, letterSpacing: "-.02em" }}>
                   <span className="mono">{fm.file_number || (editId === NEW_ID ? "New file" : "—")}</span> · {fm.supplier || "—"}
                 </h2>
-                <Pill hue={STATUS_HUE[status]} dot>{statusLabel(status)}</Pill>
+                <Pill hue={STATUS_HUE[status]} dot>{statusLabel(status, fm.cargo_type)}</Pill>
               </div>
               {fm.tracking_doc_number && (
                 <a href={carrierTrackUrl(fm.carrier, fm.tracking_doc_number)} className="oo-track" onClick={copyAndTrack}>
@@ -288,7 +288,7 @@ function ShipmentEditor({ clientId, shipId, onClose }) {
                 </Field>
                 <Field label="Status (set automatically)">
                   <div className="oo-input ro" title="Planned until a vessel or ETD is added, Booked once it is, Shipped when the 1st vessel has an SOB date.">
-                    {statusLabel(status)}
+                    {statusLabel(status, fm.cargo_type)}
                   </div>
                 </Field>
 
@@ -379,7 +379,7 @@ function ShipmentEditor({ clientId, shipId, onClose }) {
           </button>
         )}
         {current && !current.anf_received && (
-          <button type="button" className="oo-btn foot" style={{ background: "var(--pur-bg)", color: "var(--pur-fg)" }} onClick={markAnf}>ANF received</button>
+          <button type="button" className="oo-btn foot" style={{ background: "var(--pur-bg)", color: "var(--pur-fg)" }} onClick={markAnf}>{receivedLabel(fm.cargo_type)}</button>
         )}
         {current && <button type="button" className="oo-btn danger" onClick={remove}>Delete</button>}
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center" }}>

@@ -94,7 +94,7 @@ export default function ClientDetail() {
             <Pill hue={COMPANY_HUE[client.company]}>{client.company}</Pill>
           </div>
           <p style={{ fontSize: 14, color: "var(--ink2)" }}>
-            {mineActive.length} active · {mine.length - mineActive.length} archived (ANF received) · {sentT ? `Report sent ${sentT}` : "Report not sent today"}
+            {mineActive.length} active · {mine.length - mineActive.length} archived (ANF / SOB's received) · {sentT ? `Report sent ${sentT}` : "Report not sent today"}
           </p>
         </div>
         <div className="oo-actions" style={{ position: "relative" }} ref={popRef}>
@@ -126,7 +126,7 @@ export default function ClientDetail() {
         />
         <input className="oo-search wide" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search file #, supplier, vessel, doc #…" />
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "var(--ink2)" }}>
-          <span>Show ANF-archived</span>
+          <span>Show archived</span>
           <Toggle on={showArch} onChange={setShowArch} />
         </div>
       </div>
@@ -163,7 +163,7 @@ export default function ClientDetail() {
                   <span style={{ fontSize: 14, fontWeight: 500 }}>{s.supplier || "—"}</span>
                   <span style={{ fontSize: 12, color: "var(--mute)", lineHeight: 1.4, whiteSpace: "pre-line" }}>{s.order_booking_file}</span>
                 </div>
-                <Pill hue={STATUS_HUE[st]} dot>{statusLabel(st)}</Pill>
+                <Pill hue={STATUS_HUE[st]} dot>{statusLabel(st, s.cargo_type)}</Pill>
                 <div style={{ display: "flex", flexDirection: "column", gap: 5, minWidth: 0 }}>
                   <span className="oo-ellipsis" style={{ fontSize: 13, fontWeight: 600 }}>{s.vessel_name || "—"}</span>
                   {legs.length > 1 && <span style={{ fontSize: 12, color: "var(--ink2)" }}>+ {legs.slice(1).map((l) => l.name).filter(Boolean).join(" → ")}</span>}
