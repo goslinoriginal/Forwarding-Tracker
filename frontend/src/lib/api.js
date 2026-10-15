@@ -33,39 +33,26 @@ export const CARRIER_TRACK_URL = {
   Other: (n) => `https://www.track-trace.com/container?number=${encodeURIComponent(n)}`,
 };
 
-// Carriers whose master/booking number is entered with a SCAC-style prefix that
-// should be stripped before copying to clipboard — the carrier's own tracking
-// page doesn't want it re-typed.
-const CARRIER_NUMBER_PREFIX = {
-  Maersk: "MAEU",
-  ONE: "ONEY",
-  COSCO: "COSU",
+// Ocean bill of lading numbers are entered with the carrier's SCAC prefix, but the
+// carrier's own tracking page wants the number without it. The patterns only match
+// the B/L format, so container numbers that share the prefix (e.g. MAEU + 7 digits,
+// a Maersk container) are left untouched.
+const OBL_PREFIX = [
+  { carrier: "Maersk", prefix: "MAEU", pattern: /^MAEU\d{9}$/ },
+  { carrier: "ONE", prefix: "ONEY", pattern: /^ONEY[A-Z0-9]{8,}$/ },
+  { carrier: "COSCO", prefix: "COSU", pattern: /^COSU\d{8,}$/ },
+];
+
+const oblMatch = (docNumber) => {
+  const n = (docNumber || "").trim().toUpperCase();
+  return OBL_PREFIX.find((o) => o.pattern.test(n)) || null;
 };
 
-// The number itself is the source of truth for its prefix — a SCAC code like
-// MAEU/ONEY/COSU identifies the carrier regardless of what's selected in the
-// Carrier dropdown, so stripping/routing never silently no-ops just because
-// that field was left on a different value.
-const PREFIX_TO_CARRIER = Object.fromEntries(
-  Object.entries(CARRIER_NUMBER_PREFIX).map(([carrier, prefix]) => [prefix, carrier])
-);
-
-function detectCarrierFromNumber(docNumber) {
-  const upper = (docNumber || "").trim().toUpperCase();
-  for (const [prefix, carrier] of Object.entries(PREFIX_TO_CARRIER)) {
-    if (upper.startsWith(prefix)) return carrier;
-  }
-  return null;
-}
-
+/** The number as the carrier wants it typed: SCAC prefix removed from ocean B/L numbers. */
 export function clipboardTrackingNumber(carrier, docNumber) {
   const n = (docNumber || "").trim();
-  const effectiveCarrier = detectCarrierFromNumber(n) || carrier;
-  const prefix = CARRIER_NUMBER_PREFIX[effectiveCarrier];
-  if (prefix && n.toUpperCase().startsWith(prefix)) {
-    return n.slice(prefix.length);
-  }
-  return n;
+  const m = oblMatch(n);
+  return m ? n.slice(m.prefix.length) : n;
 }
 
 export function trackTraceUrl(docNumber) {
@@ -73,8 +60,10 @@ export function trackTraceUrl(docNumber) {
   return `https://www.track-trace.com/container?number=${encodeURIComponent(docNumber.trim())}`;
 }
 
+/** The carrier's tracking page for this number. A recognised B/L prefix decides the
+ *  carrier even if the Carrier field was left on something else. */
 export function carrierTrackUrl(carrier, docNumber) {
-  const effectiveCarrier = detectCarrierFromNumber(docNumber) || carrier;
-  const fn = CARRIER_TRACK_URL[effectiveCarrier] || CARRIER_TRACK_URL.Other;
-  return fn(docNumber ? docNumber.trim() : "");
+  const m = oblMatch(docNumber);
+  const fn = CARRIER_TRACK_URL[m ? m.carrier : carrier] || CARRIER_TRACK_URL.Other;
+  return fn(clipboardTrackingNumber(carrier, docNumber));
 }
