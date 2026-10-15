@@ -588,7 +588,7 @@ export default function DocBuilder({ initial, onClose }) {
                     {roeCols.map((r) => <span key={r.cur} className={`mono r ${r.sob && r.sob >= r.today ? "hi" : ""}`}>{r.sob ? r.sob.toFixed(4) : "—"}</span>)}
                     <span>Today ({docDate(dc.date)})</span>
                     {roeCols.map((r) => <span key={r.cur} className={`mono r ${r.today && r.today > r.sob ? "hi" : ""}`}>{r.today ? r.today.toFixed(4) : "—"}</span>)}
-                    <span>Higher of the two + {markupPct}%</span>
+                    <span>ROE Used</span>
                     {roeCols.map((r) => <span key={r.cur} className="mono r" style={{ fontWeight: 700 }}>{r.used ? r.used.toFixed(4) : "—"}</span>)}
                     <span style={{ gridColumn: "1 / -1", fontSize: 9, color: "#6b7385" }}>The {markupPct}% applies to the rate of exchange only, so only to foreign-currency amounts.</span>
                   </div>
