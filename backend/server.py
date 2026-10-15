@@ -707,11 +707,16 @@ def _reminder_for_shipment(s: dict, today: date) -> Optional[dict]:
             return None
         kind = "LCL cargo report (10d before ETA)"
     else:
-        # FCL: use second vessel if present, else primary
+        # FCL: use second vessel if present, else primary. Once that vessel has
+        # sailed the cargo has left, so there is nothing left to report.
         if s.get("second_vessel_name") and s.get("second_vessel_etd"):
+            if s.get("second_vessel_sob_date"):
+                return None
             target_iso = s["second_vessel_etd"]
             kind = f"Cargo report before 2nd vessel {s['second_vessel_name']}"
         else:
+            if s.get("sob_date"):
+                return None
             target_iso = s.get("planned_etd")
             kind = "Cargo report before departure"
         if not target_iso:
