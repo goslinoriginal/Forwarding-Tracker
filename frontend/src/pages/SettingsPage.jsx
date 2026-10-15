@@ -56,12 +56,12 @@ export default function SettingsPage() {
           size="lg"
           value={mailApp}
           onChange={(v) => { setMail(v); setMailApp(v); toast(v === "owa" ? "Emails open in Outlook on the web" : "Emails open in this computer's mail app"); }}
-          options={[{ value: "owa", label: "Outlook on the web" }, { value: "mailto", label: "Outlook desktop app" }]}
+          options={[{ value: "mailto", label: "Outlook desktop (classic)" }, { value: "owa", label: "Outlook on the web" }]}
         />
         <span style={{ fontSize: 13, color: "var(--ink2)", lineHeight: 1.5 }}>
           {mailApp === "owa"
             ? "Opens a new email in a browser tab at outlook.office.com — the mailbox you're already signed into, so there's no sign-in screen."
-            : "Uses Windows' default mail app. If the wrong Outlook opens (or asks you to sign in), set the right one in Windows: Settings → Apps → Default apps → search “mailto” → choose Outlook (classic)."}
+            : "Opens a new email in Outlook (classic). If the new Outlook opens instead (or asks you to sign in), set it once in Windows: Settings → Apps → Default apps → search “mailto” → choose Outlook (classic)."}
         </span>
       </section>
 

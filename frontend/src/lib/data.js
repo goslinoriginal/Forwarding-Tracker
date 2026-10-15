@@ -102,10 +102,10 @@ export async function fetchEndClients(clientId) {
 
 /** Opens the client's pre-filled status-report email in the mail app. */
 /* Where "Send" opens the new email. Saved per computer.
-   owa    – a new email in Outlook on the web (the account already signed in, in the browser)
-   mailto – the computer's default mail app (set Outlook classic as the mailto default in Windows) */
+   mailto – the computer's default mail app: Outlook (classic), once it's the mailto default in Windows (default)
+   owa    – a new email in Outlook on the web */
 const MAIL_KEY = "oceanops.mailApp";
-export const getMailApp = () => { try { return localStorage.getItem(MAIL_KEY) || "owa"; } catch { return "owa"; } };
+export const getMailApp = () => { try { return localStorage.getItem(MAIL_KEY) || "mailto"; } catch { return "mailto"; } };
 export const setMailApp = (v) => { try { localStorage.setItem(MAIL_KEY, v); } catch {} };
 
 const recipients = (list) => String(list || "").split(/[;,]/).map((x) => x.trim()).filter(Boolean);
