@@ -1117,6 +1117,10 @@ def _build_xlsx(client: dict, columns: list[tuple[str, str]], rows: list[dict]) 
     ws.title = "Shipping Report"
     ws.sheet_view.showGridLines = False
     ws.page_setup.orientation = ws.ORIENTATION_LANDSCAPE
+    # Print every column on one page width
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
 
     company_key = client.get("company", "Patuma")
     co = COMPANIES.get(company_key, COMPANIES["Patuma"])
@@ -1137,11 +1141,15 @@ def _build_xlsx(client: dict, columns: list[tuple[str, str]], rows: list[dict]) 
     min_widths = {
         "supplier": 16.5, "order_booking_file": 17.8, "file_number": 9.5,
         "status": 14.2, "sob_date": 11.7, "vessel_block": 24.2,
-        "pol": 12.5, "eta": 12.5, "final_destination": 12.7,
+        "pol": 12.5, "eta": 12.5, "final_destination": 14.5,
         "comments": 39.5, "copy_docs_status": 15.2,
         "hbill_released": 10, "expected_freight_rate": 18,
+        # Group layouts (Mushrooms, Handovers)
+        "obill": 30, "fcl_count": 9.5, "end_client": 16.5, "days_to_arrival": 10,
+        "doc_draft_bills": 13, "doc_copy_invoices": 13, "doc_original_invoices": 13,
     }
     widths = [min_widths.get(key, 14) for key, _ in columns]
+    widths[0] = max(widths[0], 12.5)  # the report date sits in the first column
 
     if logo_path and os.path.exists(logo_path):
         try:
@@ -1244,7 +1252,16 @@ def _build_xlsx(client: dict, columns: list[tuple[str, str]], rows: list[dict]) 
         c.font = font
         c.alignment = header_align
         c.border = header_border
-    ws.row_dimensions[4].height = 42
+    # Tall enough for the longest heading once it wraps (e.g. "Original Invoices & Phyto's Received")
+    def _lines(text: str, width: float) -> int:
+        n, cur = 1, 0
+        for word in str(text).split():
+            if cur and cur + 1 + len(word) > width * 0.85:
+                n, cur = n + 1, len(word)
+            else:
+                cur += (1 if cur else 0) + len(word)
+        return n
+    ws.row_dimensions[4].height = max(42, 14 * max(_lines(label, w) for (_, label), w in zip(columns, widths)) + 6)
 
     # Data rows
     body_font = Font(color="000000", size=12, name="Arial")

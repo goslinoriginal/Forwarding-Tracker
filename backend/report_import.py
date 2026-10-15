@@ -86,6 +86,8 @@ AUTO_SENTENCE = re.compile(
     re.I,
 )
 
+LEAD_TAG_RE = re.compile(r"^\(\s*\d\s*(?:st|nd|rd|th)?\s*vessel\s*\)\s*", re.I)
+
 
 def _norm(v) -> str:
     return " ".join(str(v or "").replace("’", "'").split())
@@ -415,6 +417,8 @@ def _parse_row(rec: dict, raw: list, cols: dict, ref: date, cutoff: date) -> dic
     seen_auto = False
     for sent in re.split(r"(?<=\.)\s+", body):
         sent = " ".join(sent.split())
+        # "Now planned ETD 17.10. (2nd Vessel) Awaiting…": the leg tag belongs to the date before it
+        sent = LEAD_TAG_RE.sub("", sent)
         if not sent.strip(" ."):
             continue
         if AUTO_SENTENCE.search(sent) or SOB_RE.search(sent) or ETD_RE.search(sent):
