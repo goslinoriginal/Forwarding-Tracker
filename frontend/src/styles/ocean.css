@@ -407,6 +407,7 @@ textarea.oo-input { line-height: 1.5; resize: none; }
   .oo-logo { width: 150px; margin: 0; flex: none; }
   .oo-nav { flex-direction: row; }
   .oo-roe-chip { margin: 0 0 0 auto; flex: none; padding: 8px 12px; }
+  .oo-side-search { flex: none; }
   .oo-main { padding: 0 8px 8px; }
   .oo-page, .oo-page.detail, .oo-page.narrow { padding: 24px 18px 40px; }
   .oo-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -434,3 +435,20 @@ textarea.oo-input { line-height: 1.5; resize: none; }
 }
 .oo-roe-chip:hover { box-shadow: var(--sh); }
 .oo-roe-chip .k { font-size: 11px; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; color: var(--mute); }
+
+/* Find shipments */
+.oo-finder-row {
+  display: grid; grid-template-columns: 72px minmax(110px, 1fr) minmax(160px, 1.4fr) 84px 110px 120px; gap: 12px; align-items: start;
+  padding: 11px 14px; border: none; border-top: 1px solid var(--line2); background: var(--panel); font: inherit; color: inherit;
+  text-align: left; cursor: pointer; transition: background 0.15s;
+}
+.oo-finder-row:hover { background: var(--sub); }
+@media (max-width: 760px) { .oo-finder-row { grid-template-columns: 64px 1fr 1fr; } }
+.oo-side-search {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border-radius: 12px;
+  border: 1px solid var(--line); background: var(--panel); font: inherit; font-size: 13px; color: var(--mute); cursor: pointer; text-align: left;
+}
+.oo-side-search:hover { color: var(--ink); box-shadow: var(--sh); }
+.oo-side-search kbd { font-family: var(--mono); font-size: 11px; padding: 1px 6px; border-radius: 5px; border: 1px solid var(--line); }
+.oo-bar-row.click { cursor: pointer; border-radius: 8px; margin: -4px -6px; padding: 4px 6px; transition: background 0.15s; }
+.oo-bar-row.click:hover { background: var(--sub); }

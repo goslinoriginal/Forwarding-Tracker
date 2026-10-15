@@ -3,6 +3,7 @@ import { api } from "@/lib/api";
 import { displayStatus, pinSort, useClients, useRefresh, useReminders, useReportLog, useShipments } from "@/lib/data";
 import { CARGO_HUE, CARRIER_HUE, Pill, dm, greeting, longToday, useToast } from "@/lib/ui";
 import { useEditor } from "@/components/ShipmentEditor";
+import { useFinder } from "@/components/ShipmentFinder";
 
 const REMINDER_COLS = "44px 1.2fr 80px 1.3fr 1.4fr 64px 1.5fr 72px 96px 60px";
 
@@ -22,6 +23,7 @@ export default function Dashboard() {
   const toast = useToast();
   const refresh = useRefresh();
   const { openEditor } = useEditor();
+  const { openFinder } = useFinder();
   const { data: clients = [] } = useClients();
   const { data: ships = [] } = useShipments();
   const { data: reminders = [] } = useReminders();
@@ -168,11 +170,11 @@ export default function Dashboard() {
         <div className="oo-card pad fade-up" style={{ animationDelay: ".28s" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
             <h2 className="oo-h2">Volume by carrier</h2>
-            <span className="oo-sub">Active only</span>
+            <span className="oo-sub">Active only · click a carrier</span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {carriers.map((k, i) => (
-              <div key={k} className="oo-bar-row">
+              <div key={k} className="oo-bar-row click" role="button" tabIndex={0} title={`Show ${k} shipments`} onClick={() => openFinder({ carrier: k })} onKeyDown={(e) => e.key === "Enter" && openFinder({ carrier: k })} data-testid={`carrier-${k}`}>
                 <span className="mono" style={{ fontSize: 12, color: "var(--ink2)" }}>{k}</span>
                 <div className="oo-bar">
                   <div style={{ width: `${(counts[k] / max) * 100}%`, background: `oklch(0.62 0.12 ${CARRIER_HUE[k] ?? 250})`, animationDelay: `${i * 60 + 200}ms` }} />

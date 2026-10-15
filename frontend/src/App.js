@@ -3,6 +3,7 @@ import { ThemeProvider } from "@/lib/theme";
 import { ToastProvider } from "@/lib/ui";
 import AppShell from "@/components/AppShell";
 import { EditorProvider } from "@/components/ShipmentEditor";
+import { FinderProvider } from "@/components/ShipmentFinder";
 import Dashboard from "@/pages/Dashboard";
 import ClientsPage from "@/pages/ClientsPage";
 import ClientDetail from "@/pages/ClientDetail";
@@ -15,6 +16,7 @@ export default function App() {
       <ToastProvider>
         <BrowserRouter>
           <EditorProvider>
+            <FinderProvider>
             <AppShell>
               <Routes>
                 <Route path="/" element={<Dashboard />} />
@@ -25,6 +27,7 @@ export default function App() {
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </AppShell>
+            </FinderProvider>
           </EditorProvider>
         </BrowserRouter>
       </ToastProvider>

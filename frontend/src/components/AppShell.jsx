@@ -4,6 +4,7 @@ import { roeFor, useRoe } from "@/lib/data";
 import { todayIso } from "@/lib/ui";
 import { isWorkday } from "@/lib/holidays";
 import RoeModal, { skippedToday, snoozed } from "@/components/RoeModal";
+import { useFinder } from "@/components/ShipmentFinder";
 
 const ROE_ASK_HOUR = 10; // rates usually arrive by 10:00
 
@@ -16,6 +17,7 @@ const NAV = [
 
 export default function AppShell({ children }) {
   const navigate = useNavigate();
+  const { openFinder } = useFinder();
   const { pathname } = useLocation();
 
   useEffect(() => { window.scrollTo(0, 0); }, [pathname]);
@@ -43,6 +45,9 @@ export default function AppShell({ children }) {
     <div className="oo-app">
       <aside className="oo-side">
         <div className="oo-logo" role="img" aria-label="C-Freight Portal" />
+        <button type="button" className="oo-side-search" onClick={() => openFinder()} data-testid="side-search">
+          <span>Search shipments</span><kbd>/</kbd>
+        </button>
         <nav className="oo-nav">
           {NAV.map((n) => (
             <button
