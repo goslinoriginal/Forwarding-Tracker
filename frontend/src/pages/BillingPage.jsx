@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import InvoiceTotals from "@/components/InvoiceTotals";
 import { pinSort, useClients, useDocuments, useShipments } from "@/lib/data";
 import { calc, makeDoc, money } from "@/lib/billingCalc";
 import { DOC_STATUS_HUE, DOC_TYPE_HUE, Modal, Pill, Seg, dmy, useToast } from "@/lib/ui";
@@ -16,6 +18,9 @@ export default function BillingPage() {
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(null);
   const [asking, setAsking] = useState(false);
+  const [params, setParams] = useSearchParams();
+  const view = params.get("view") === "totals" ? "totals" : "docs";
+  const setView = (v) => setParams(v === "totals" ? { view: "totals" } : {}, { replace: true });
 
   const nameOf = (id) => clients.find((c) => c.id === id)?.name;
   const q = search.trim().toLowerCase();
@@ -51,6 +56,13 @@ export default function BillingPage() {
         </div>
       </div>
 
+      <div style={{ display: "flex" }}>
+        <Seg size="lg" value={view} onChange={setView} options={[{ value: "docs", label: "Quotes & pro formas" }, { value: "totals", label: "Invoiced totals" }]} />
+      </div>
+
+      {view === "totals" ? (
+        <InvoiceTotals docs={docs} clients={clients} onShowClient={(name) => { setFilter("Pro formas"); setSearch(name); setView("docs"); }} />
+      ) : (<>
       <div className="oo-toolbar">
         <Seg value={filter} onChange={setFilter} options={FILTERS.map((f) => ({ value: f, label: f, count: docs.filter((d) => matches(d, f)).length }))} />
         <input className="oo-search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search client, doc #, file #…" />
@@ -87,6 +99,8 @@ export default function BillingPage() {
           )}
         </div>
       </div>
+
+      </>)}
 
       {asking && (
         <FilePrompt

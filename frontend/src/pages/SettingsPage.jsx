@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api, OPTIONAL_COLUMNS } from "@/lib/api";
-import { useClients, useRefresh, useRoe, useSettings } from "@/lib/data";
+import { getMailApp, setMailApp, useClients, useRefresh, useRoe, useSettings } from "@/lib/data";
 import { ENTITIES } from "@/lib/billingCalc";
 import { Seg, Toggle, dmy, todayIso, useChip, useToast } from "@/lib/ui";
 import RoeModal from "@/components/RoeModal";
@@ -17,6 +17,7 @@ export default function SettingsPage() {
   const { data: rates = [] } = useRoe();
   const [roeEdit, setRoeEdit] = useState(null);
   const [roeAll, setRoeAll] = useState(false);
+  const [mailApp, setMail] = useState(getMailApp);
 
   const update = async (patch) => {
     try {
@@ -47,6 +48,21 @@ export default function SettingsPage() {
           <span style={{ fontSize: 14, fontWeight: 500 }}>Dark mode</span>
           <Toggle size="lg" on={dark} onChange={toggle} title="Toggle dark mode" />
         </div>
+      </section>
+
+      <section className="oo-set" style={{ gap: 14 }}>
+        <div className="oo-card-title"><h2>Email</h2><span className="oo-sub">Where "Send report" and "Send to client" open the new email, with To, CC, subject and wording filled in. Saved on this computer.</span></div>
+        <Seg
+          size="lg"
+          value={mailApp}
+          onChange={(v) => { setMail(v); setMailApp(v); toast(v === "owa" ? "Emails open in Outlook on the web" : "Emails open in this computer's mail app"); }}
+          options={[{ value: "owa", label: "Outlook on the web" }, { value: "mailto", label: "Outlook desktop app" }]}
+        />
+        <span style={{ fontSize: 13, color: "var(--ink2)", lineHeight: 1.5 }}>
+          {mailApp === "owa"
+            ? "Opens a new email in a browser tab at outlook.office.com — the mailbox you're already signed into, so there's no sign-in screen."
+            : "Uses Windows' default mail app. If the wrong Outlook opens (or asks you to sign in), set the right one in Windows: Settings → Apps → Default apps → search “mailto” → choose Outlook (classic)."}
+        </span>
       </section>
 
       <section className="oo-set" style={{ gap: 12 }}>

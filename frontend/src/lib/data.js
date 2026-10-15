@@ -101,16 +101,44 @@ export async function fetchEndClients(clientId) {
 }
 
 /** Opens the client's pre-filled status-report email in the mail app. */
+/* Where "Send" opens the new email. Saved per computer.
+   owa    – a new email in Outlook on the web (the account already signed in, in the browser)
+   mailto – the computer's default mail app (set Outlook classic as the mailto default in Windows) */
+const MAIL_KEY = "oceanops.mailApp";
+export const getMailApp = () => { try { return localStorage.getItem(MAIL_KEY) || "owa"; } catch { return "owa"; } };
+export const setMailApp = (v) => { try { localStorage.setItem(MAIL_KEY, v); } catch {} };
+
+const recipients = (list) => String(list || "").split(/[;,]/).map((x) => x.trim()).filter(Boolean);
+
+/** Opens a ready-to-send email: To, CC, subject and body filled in. */
+export function composeEmail({ to, cc, subject, body }) {
+  const toL = recipients(to);
+  const ccL = recipients(cc);
+  if (getMailApp() === "owa") {
+    const q = [["to", toL.join(";")], ["cc", ccL.join(";")], ["subject", subject], ["body", body]]
+      .filter(([, v]) => v)
+      .map(([k, v]) => `${k}=${encodeURIComponent(v)}`)
+      .join("&");
+    window.open(`https://outlook.office.com/mail/deeplink/compose?${q}`, "_blank", "noopener");
+    return;
+  }
+  const params = new URLSearchParams();
+  if (ccL.length) params.set("cc", ccL.join(";"));
+  if (subject) params.set("subject", subject);
+  if (body) params.set("body", body);
+  window.location.href = `mailto:${toL.map(encodeURIComponent).join(";")}?${params.toString().replace(/\+/g, "%20")}`;
+}
+
 export function openReportEmail(client) {
   const to = (client.email_to || client.contact_email || "").trim();
   if (!to) return false;
   const cc = (client.email_cc || "").trim();
   const greetingName = (client.email_greeting || client.name || "").trim();
-  const params = new URLSearchParams();
-  if (cc) params.set("cc", cc);
-  params.set("subject", `Status Report - ${client.name}`);
-  params.set("body", `Dear ${greetingName},\n\nPlease see attached Status Report for your pending shipments.\n\nThanks.`);
-  window.location.href = `mailto:${encodeURIComponent(to)}?${params.toString().replace(/\+/g, "%20")}`;
+  composeEmail({
+    to, cc,
+    subject: `Status Report - ${client.name}`,
+    body: `Dear ${greetingName},\n\nPlease see attached Status Report for your pending shipments.\n\nThanks.`,
+  });
   return true;
 }
 

@@ -139,8 +139,10 @@ const UNIT_RE = /(\d+)\s*(ctns?|cartons?|pkgs?|packages?|plts?|pallets?|pcs|piec
 export function parseOrder(text) {
   const t = String(text || "");
   const out = {};
-  const cn = [...t.matchAll(/(\d+)\s*x\s*(?:20|40|45)\s*'/gi)].reduce((a, m) => a + Number(m[1]), 0);
+  const boxes = [...t.matchAll(/(\d+)\s*x\s*(20|40|45)\s*'?\s*(HC|HQ|OT|FR|RF)?/gi)];
+  const cn = boxes.reduce((a, m) => a + Number(m[1]), 0);
   if (cn) out.cntrs = String(cn);
+  out.boxes = boxes.map((m) => `${m[1]}x${m[2]}'${m[3] ? ` ${m[3].toUpperCase()}` : ""}`).join(" + ");
   const kg = t.match(/(\d[\d.,]*)\s*kgs?\b/i);
   if (kg) out.kgs = kg[1];
   const cbm = t.match(/(\d[\d.,]*)\s*cbm\b/i);
@@ -167,11 +169,24 @@ export function parseOrder(text) {
   return out;
 }
 
+/** "2x20' FCLs", "1x40' HC LCL", "LCL" — the containers and whether it's FCL or LCL. */
+export function equipmentText(orderText, cargoType, fclCount) {
+  const { boxes, cntrs } = parseOrder(orderText);
+  const lcl = String(cargoType || "").toUpperCase() === "LCL" || /\bLCL\b/i.test(orderText || "");
+  if (lcl) return boxes ? `${boxes} LCL` : "LCL";
+  const n = Number(cntrs || fclCount) || 0;
+  if (boxes) return `${boxes} FCL${n > 1 ? "s" : ""}`;
+  return n ? `${n}x FCL${n > 1 ? "s" : ""}` : "FCL";
+}
+
+/** "1571,34" → "1571.34" for EasyClear. */
+export const dotDecimal = (v) => String(v || "").trim().replace(/\s/g, "").replace(",", ".");
+
 export function makeDoc(tpl, type, o) {
   return {
     id: null, type, tpl, no: "", clientId: "", entity: "Clearfreight",
     date: isoPlusDays(0), until: isoPlusDays(type === "quote" ? 30 : 7),
-    file: "", ref: "", att: "", prep: "", commodity: "", units: "", unitType: "Crates", cbm: "", kgs: "",
+    file: "", ref: "", att: "", prep: "", commodity: "", units: "", unitType: "", equipment: "", bl: "", cbm: "", kgs: "",
     pol: "", pod: "Durban", via: "", transit: "", vessel: "", freq: "", inco: "FOB", cntrs: "1", jhb: false,
     usdSob: "", usdToday: "", eurSob: "", eurToday: "", markup: String(TPL[tpl].markup),
     lines: TPL[tpl].lines(), notes: type === "quote" ? QUOTE_TERMS : PFI_TERMS, status: "Draft", entered: {},

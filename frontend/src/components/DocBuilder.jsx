@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "@/lib/api";
-import { clientEmail, roeDay, roeFor, shipmentLegs, useClients, useRefresh, useRoe, useShipments } from "@/lib/data";
+import { clientEmail, composeEmail, roeDay, roeFor, shipmentLegs, useClients, useRefresh, useRoe, useShipments } from "@/lib/data";
 import {
-  DEF_OF, ENTITIES, GROUPS, INCO, Ln, PFI_TERMS, QUOTE_TERMS, SYM, TPL, calc, ecDesc, fmt, money, num, parseOrder,
+  DEF_OF, ENTITIES, GROUPS, INCO, Ln, PFI_TERMS, QUOTE_TERMS, SYM, TPL, calc, dotDecimal, ecDesc, equipmentText, fmt, money, num, parseOrder,
 } from "@/lib/billingCalc";
 import { offReason } from "@/lib/holidays";
 import { Seg, copyText, dmy, isoPlusDays, useToast } from "@/lib/ui";
@@ -37,8 +37,8 @@ export function fromShipment(s, client) {
     file: s.file_number || "",
     ref: o.ref || "",
     commodity: o.commodity || "",
-    units: o.units || "",
-    unitType: o.unitType || "Crates",
+    equipment: equipmentText(s.order_booking_file, s.cargo_type, s.fcl_count),
+    bl: s.tracking_doc_number || "",
     cbm: o.cbm || "",
     kgs: o.kgs || "",
     cntrs: o.cntrs || s.fcl_count || "1",
@@ -128,8 +128,7 @@ export default function DocBuilder({ initial, onClose }) {
     const d = await save({ status: dc.status === "Draft" ? "Sent" : dc.status });
     const to = clientEmail(client);
     if (to) {
-      const params = new URLSearchParams({ subject: `${tl} ${d.no} – ${client.name}`, body: `Dear ${client.email_greeting || client.name},\n\nPlease find attached ${isQ ? "our quotation" : "the pro forma invoice"} ${d.no} (total ${money("ZAR", c.total)} incl. VAT).\n\nKind regards.` });
-      window.location.href = `mailto:${encodeURIComponent(to)}?${params.toString().replace(/\+/g, "%20")}`;
+      composeEmail({ to, cc: client.email_cc, subject: `${tl} ${d.no} – ${client.name}`, body: `Dear ${client.email_greeting || client.name},\n\nPlease find attached ${isQ ? "our quotation" : "the pro forma invoice"} ${d.no} (total ${money("ZAR", c.total)} incl. VAT).\n\nKind regards.` });
     }
     toast(`${tl} ${d.no} marked sent${to ? ` · email to ${to} opened — attach the PDF` : ""}`);
   });
@@ -245,7 +244,15 @@ export default function DocBuilder({ initial, onClose }) {
     return { g, label: `Total ${label.toLowerCase()}`, rows, sub: fmt(rows.reduce((a, l) => a + l.zar, 0)), vat: fmt(rows.reduce((a, l) => a + l.vatAmt, 0)) };
   }).filter(Boolean);
   const party = [[isQ ? "To" : "Client", client.name || "—"], ["Attention", dc.att], ["Date", dmy(dc.date)], [isQ ? "Valid until" : "Payment due", dmy(dc.until)], ["Ref no", dc.ref], ["File", dc.file], ["Prepared by", dc.prep], ["Email", clientEmail(client)]].filter((p) => p[1]);
-  const shipInfo = [["Commodity", dc.commodity], ["Units", [dc.units, dc.unitType].filter(Boolean).join(" ")], ["CBM", dc.cbm], ["KGS", dc.kgs], ["ETD / POL", dc.pol], ["ETA / POD", dc.pod], ["Via", dc.via], ["Transit time", dc.transit], ["Vessel", dc.vessel], ["SOB date", dmy(dc.sob)], ["ETA", dmy(dc.eta)], ["Frequency", dc.freq], ["Terms", dc.inco], ["R.O.E.", `USD ${roeTxt(c.roe.USD)}${usesEur ? ` · EUR ${roeTxt(c.roe.EUR)}` : ""}`]].filter((p) => p[1]);
+  const shipInfo = [["Containers", dc.equipment], ["Total weight", dc.kgs && `${dc.kgs} KGS`], ["Total volume", dc.cbm && `${dc.cbm} CBM`], ["B/L no.", dc.bl], ["Commodity", dc.commodity], ["ETD / POL", dc.pol], ["ETA / POD", dc.pod], ["Via", dc.via], ["Transit time", dc.transit], ["Vessel", dc.vessel], ["SOB date", dmy(dc.sob)], ["ETA", dmy(dc.eta)], ["Frequency", dc.freq], ["Terms", dc.inco], ["R.O.E.", `USD ${roeTxt(c.roe.USD)}${usesEur ? ` · EUR ${roeTxt(c.roe.EUR)}` : ""}`]].filter((p) => p[1]);
+  // EasyClear wants these five, in this order
+  const ecShip = [
+    ["Vessel", (dc.vessel || "").split(" / ").pop().trim().toUpperCase()],
+    ["B/L number", (dc.bl || "").toUpperCase()],
+    ["Containers", (dc.equipment || "").toUpperCase()],
+    ["Weight", dc.kgs ? `${dotDecimal(dc.kgs)} KGS` : ""],
+    ["Volume", dc.cbm ? `${dotDecimal(dc.cbm)} CBM` : ""],
+  ];
   const entered = dc.entered || {};
   const markEntered = (id, v) => setD((d) => ({ entered: { ...(d.entered || {}), [id]: v } }));
   const doneN = live.filter((l) => entered[l.id]).length;
@@ -313,8 +320,8 @@ export default function DocBuilder({ initial, onClose }) {
                 </select>
               </F>
               <F label="Commodity"><input className="oo-input b" value={dc.commodity} onChange={on("commodity")} placeholder="e.g. Pumps (non haz)" /></F>
-              <F label="Units"><input className="oo-input b" value={dc.units} onChange={on("units")} placeholder="e.g. 2" /></F>
-              <F label="Unit type"><input className="oo-input b" value={dc.unitType} onChange={on("unitType")} placeholder="Crates" /></F>
+              <F label="Containers"><input className="oo-input b" value={dc.equipment || ""} onChange={on("equipment")} placeholder="e.g. 2x20' FCLs / 1x40' HC LCL" /></F>
+              <F label="B/L (master) number"><input className="oo-input b mono" value={dc.bl || ""} onChange={on("bl")} placeholder="e.g. ONEYNB6JIT441700" /></F>
               <F label="CBM"><input className="oo-input b" value={dc.cbm} onChange={on("cbm")} placeholder="0.000" inputMode="decimal" /></F>
               <F label="KGS"><input className="oo-input b" value={dc.kgs} onChange={on("kgs")} placeholder="0" inputMode="decimal" /></F>
               <F label="No. of containers"><input className="oo-input b" value={dc.cntrs} onChange={on("cntrs")} placeholder="1" inputMode="numeric" /></F>
@@ -451,6 +458,20 @@ export default function DocBuilder({ initial, onClose }) {
                 <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
                   <span style={{ fontSize: 15, fontWeight: 600 }}>EasyClear invoice lines</span>
                   <span style={{ fontSize: 12, color: "var(--mute)" }}>Click a cell to copy it, then paste into EasyClear. Copying an amount ticks the line off. VAT S = 15%, Z = zero rated · Type D = disbursement, R = revenue.</span>
+                </div>
+                <div style={{ background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 16, overflow: "hidden" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "var(--sub)", fontSize: 12, fontWeight: 500, color: "var(--mute)" }}>
+                    <span>Shipment details — top to bottom</span>
+                    <button type="button" className="oo-link" style={{ fontSize: 12 }} onClick={() => flash(ecShip.map((x) => x[1]).join("\n"), "ship")}>{copied === "ship" ? "Copied ✓" : "Copy all 5"}</button>
+                  </div>
+                  {ecShip.map(([k, v], i) => (
+                    <div key={k} style={{ display: "grid", gridTemplateColumns: "110px minmax(0,1fr)", alignItems: "center", gap: 10, padding: "4px 14px", borderTop: "1px solid var(--line2)" }}>
+                      <span style={{ fontSize: 12, color: "var(--mute)" }}>{k}</span>
+                      {v ? (
+                        <button type="button" className={`oo-ec-cell mono ${copied === `s${i}` ? "copied" : ""}`} style={{ fontWeight: 500 }} title={`Copy ${k.toLowerCase()}`} onClick={() => flash(v, `s${i}`)} data-testid={`ec-ship-${i}`}>{v}</button>
+                      ) : <span style={{ fontSize: 12, color: "var(--amb-fg)", padding: "6px 0" }}>Not filled in</span>}
+                    </div>
+                  ))}
                 </div>
                 <div style={{ background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 16, overflow: "hidden" }}>
                   <div className="oo-ec" style={{ padding: "10px 12px", fontSize: 11, fontWeight: 500, color: "var(--mute)", background: "var(--sub)" }}>

@@ -1,6 +1,8 @@
 import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
-import { displayStatus, pinSort, useClients, useRefresh, useReminders, useReportLog, useShipments } from "@/lib/data";
+import { displayStatus, pinSort, useClients, useDocuments, useRefresh, useReminders, useReportLog, useShipments } from "@/lib/data";
+import { money } from "@/lib/billingCalc";
+import { invoiceStats, monthLabel, monthlyTotals } from "@/lib/billingStats";
 import { CARGO_HUE, CARRIER_HUE, Pill, dm, greeting, longToday, useToast } from "@/lib/ui";
 import { useEditor } from "@/components/ShipmentEditor";
 import { useFinder } from "@/components/ShipmentFinder";
@@ -28,6 +30,7 @@ export default function Dashboard() {
   const { data: ships = [] } = useShipments();
   const { data: reminders = [] } = useReminders();
   const { data: sent = {} } = useReportLog();
+  const { data: docs = [] } = useDocuments();
 
   const active = ships.filter((s) => !s.anf_received);
   const countFor = (id) => active.filter((s) => s.client_id === id).length;
@@ -89,6 +92,8 @@ export default function Dashboard() {
         <div className="oo-kpi" style={{ background: "var(--red-bg)", color: "var(--red-fg)", animationDelay: ".12s" }}><span>Delayed</span><span className="n">{delayed}</span></div>
         <div className="oo-kpi" style={{ background: "var(--amb-bg)", color: "var(--amb-fg)", animationDelay: ".16s" }}><span>Cargo reports due</span><span className="n">{reminders.length}</span></div>
       </div>
+
+      <InvoicedCard docs={docs} onOpen={() => navigate("/billing?view=totals")} />
 
       {priority.length > 0 && (
         <div className="oo-card fade-up" style={{ animationDelay: ".18s" }}>
@@ -185,6 +190,42 @@ export default function Dashboard() {
             {!carriers.length && <span className="oo-sub">No active shipments.</span>}
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* What's been invoiced this month — every saved pro forma, drafts included. */
+function InvoicedCard({ docs, onOpen }) {
+  const { all } = invoiceStats(docs, { period: "month" });
+  const { all: last } = invoiceStats(docs, { period: "last" });
+  const months = monthlyTotals(docs, { n: 6 });
+  const max = Math.max(1, ...months.map((m) => m.total));
+  const diff = last.total ? Math.round(((all.total - last.total) / last.total) * 100) : null;
+  return (
+    <div className="oo-card pad fade-up oo-inv-card click" role="button" tabIndex={0} style={{ animationDelay: ".17s", cursor: "pointer" }} onClick={onOpen} onKeyDown={(e) => e.key === "Enter" && onOpen()} data-testid="invoiced-card">
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <span className="oo-sub">Invoiced this month</span>
+        <span className="mono" style={{ fontSize: 30, fontWeight: 600, letterSpacing: "-.02em" }} data-testid="invoiced-total">{money("ZAR", all.total)}</span>
+        <span style={{ fontSize: 13, color: "var(--ink2)" }}>
+          {all.n} pro forma{all.n === 1 ? "" : "s"} incl. VAT
+          {diff !== null && <span style={{ color: diff >= 0 ? "var(--grn-fg)" : "var(--red-fg)" }}> · {diff >= 0 ? "▲" : "▼"} {Math.abs(diff)}% vs last month</span>}
+        </span>
+      </div>
+      <div className="oo-months" style={{ gridTemplateColumns: "repeat(6, minmax(0,1fr))", height: 96 }}>
+        {months.map((m, i) => (
+          <div key={m.key} className="oo-month" title={`${monthLabel(m.key, true)}: ${money("ZAR", m.total)}`}>
+            <div className="col"><div style={{ height: `${(m.total / max) * 100}%`, opacity: i === months.length - 1 ? 1 : 0.45, animationDelay: `${i * 50}ms` }} /></div>
+            <span className="k">{monthLabel(m.key)}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "auto auto", gap: "5px 18px", fontSize: 13 }}>
+        <span style={{ color: "var(--mute)" }}>Revenue (our fees)</span><span className="mono r" style={{ color: "var(--grn-fg)" }}>{money("ZAR", all.revenue)}</span>
+        <span style={{ color: "var(--mute)" }}>Drafts</span><span className="mono r">{money("ZAR", all.Draft)}</span>
+        <span style={{ color: "var(--mute)" }}>Sent, not paid</span><span className="mono r" style={{ color: all.Sent ? "var(--amb-fg)" : undefined }}>{money("ZAR", all.Sent)}</span>
+        <span style={{ color: "var(--mute)" }}>Paid</span><span className="mono r">{money("ZAR", all.Paid)}</span>
+        <span className="oo-link" style={{ gridColumn: "1 / -1", justifySelf: "end", paddingTop: 4 }}>Totals per client →</span>
       </div>
     </div>
   );

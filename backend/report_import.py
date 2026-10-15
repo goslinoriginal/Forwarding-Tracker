@@ -172,9 +172,12 @@ def _split_vessels(text: str) -> tuple[list[str], str, list[str]]:
 
 def _cargo_type(order: str, comments: str, docs: list[str]) -> str:
     o = order.upper()
+    # "1x40' HC LCL" is LCL in a consolidation box — the word LCL wins over a container size
+    if re.search(r"\bLCL\b", o):
+        return "LCL"
     if re.search(r"\d\s*X\s*(20|40)|FCL", o):
         return "FCL"
-    if "LCL" in o or re.search(r"SOB'?S", comments.upper()) or any(HOUSE_BILL_RE.match(d) for d in docs):
+    if re.search(r"SOB'?S", comments.upper()) or any(HOUSE_BILL_RE.match(d) for d in docs):
         return "LCL"
     if "CBM" in o and not re.search(r"(20|40)\s*'", o):
         return "LCL"

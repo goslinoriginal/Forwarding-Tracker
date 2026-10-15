@@ -452,3 +452,17 @@ textarea.oo-input { line-height: 1.5; resize: none; }
 .oo-side-search kbd { font-family: var(--mono); font-size: 11px; padding: 1px 6px; border-radius: 5px; border: 1px solid var(--line); }
 .oo-bar-row.click { cursor: pointer; border-radius: 8px; margin: -4px -6px; padding: 4px 6px; transition: background 0.15s; }
 .oo-bar-row.click:hover { background: var(--sub); }
+
+/* Invoicing totals */
+.oo-months { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 8px; align-items: end; height: 190px; }
+.oo-month { display: flex; flex-direction: column; align-items: center; gap: 6px; height: 100%; min-width: 0; }
+.oo-month .v { font-size: 10px; color: var(--ink2); min-height: 12px; }
+.oo-month .col { flex: 1; width: 100%; max-width: 34px; display: flex; align-items: flex-end; }
+.oo-month .col > div { width: 100%; min-height: 2px; border-radius: 7px 7px 3px 3px; background: var(--accent); display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden; transform-origin: bottom; animation: growUp 0.6s var(--ease) both; }
+.oo-month .col .paid { background: var(--grn-fg); opacity: 0.85; }
+.oo-month .k { font-size: 11px; color: var(--mute); white-space: nowrap; }
+.oo-swatch { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+@keyframes growUp { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@media (max-width: 900px) { .oo-two { grid-template-columns: 1fr !important; } .oo-months { gap: 4px; } }
+.oo-card.oo-inv-card { display: grid; grid-template-columns: minmax(200px, 1fr) minmax(0, 1.4fr) auto; gap: 24px; align-items: center; }
+@media (max-width: 900px) { .oo-card.oo-inv-card { grid-template-columns: 1fr; } }
