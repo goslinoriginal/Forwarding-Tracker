@@ -52,13 +52,16 @@ export function fromShipment(s, client) {
   };
 }
 
-const QUOTE_CARRY = ["tpl", "markup", "commodity", "pol", "pod", "via", "transit", "freq", "inco", "cntrs", "jhb", "ref", "att", "prep", "cbm", "kgs", "equipment"];
+const QUOTE_CARRY = ["commodity", "pol", "via", "transit", "freq", "inco", "ref", "att", "prep"];
 
-/** A pro forma based on an accepted quote: the quote's charges and terms, with the
- *  shipment's actual details from the status report on top. */
+/** A pro forma for a file that had a quote. The pro forma is a freight statement, so it
+ *  starts from the standard rate sheet — the quote is only linked, to be shown alongside.
+ *  Descriptive details (commodity, POL…) come from the quote; the shipment's own details
+ *  from the status report win. */
 export function pfiFromQuote(quote, ship, client) {
-  const base = Object.fromEntries(QUOTE_CARRY.filter((k) => quote[k] !== undefined).map((k) => [k, quote[k]]));
+  const base = Object.fromEntries(QUOTE_CARRY.filter((k) => quote[k]).map((k) => [k, quote[k]]));
   const fill = ship ? fromShipment(ship, client) : {};
+  const tpl = fill.cargoTpl || (["fcl", "lcl", "eu"].includes(quote.tpl) ? quote.tpl : "fcl");
   delete fill.cargoTpl;
   const shipVals = Object.fromEntries(Object.entries(fill).filter(([, v]) => v !== "" && v !== false));
   return {
@@ -66,8 +69,10 @@ export function pfiFromQuote(quote, ship, client) {
     clientId: quote.clientId,
     entity: quote.entity,
     ...shipVals,
+    tpl,
+    markup: String(TPL[tpl].markup),
+    lines: TPL[tpl].lines(),
     file: ship?.file_number || quote.file || "",
-    lines: (quote.lines || []).map((l) => ({ ...l })),
     quoteId: quote.id,
     quoteNo: quote.no,
   };
@@ -174,11 +179,11 @@ export default function DocBuilder({ initial, onClose }) {
     const no = await nextDocNumber("pfi");
     const ship = dc.file ? ships.find((x) => x.client_id === dc.clientId && x.file_number === dc.file) : null;
     setDc((d) => ({
-      ...d, ...pfiFromQuote({ ...d, id: q.id, no: q.no }, ship, client),
+      ...pfiFromQuote({ ...d, id: q.id, no: q.no }, ship, client),
       id: null, type: "pfi", no, date: isoPlusDays(0), until: isoPlusDays(7), notes: PFI_TERMS, status: "Draft", entered: {},
       usdSob: "", usdToday: "", eurSob: "", eurToday: "", roeAuto: {},
     }));
-    toast(`Quote ${q.no} accepted · pro forma ${no} created from it`);
+    toast(`Quote ${q.no} accepted · pro forma ${no} started — the quote is shown alongside`);
   });
   const onDelete = guard(async () => {
     const old = dc;
@@ -258,6 +263,14 @@ export default function DocBuilder({ initial, onClose }) {
     if (!rows.length && g === "customs") return null;
     return { g, label, rows, sub: money("ZAR", rows.reduce((a, l) => a + l.zar, 0)) };
   }).filter(Boolean);
+  // Copy one quoted charge into the pro forma (same charge → update its rate, else add it)
+  const applyQuoteLine = (ql) => {
+    const key = (l) => (l.ec || l.desc || "").trim().toUpperCase();
+    const match = dc.lines.find((l) => key(l) === key(ql));
+    const pick = { cur: ql.cur, basis: ql.basis, rate: ql.rate, base: ql.base, vat: ql.vat, type: ql.type, of: ql.of };
+    setD((d) => ({ lines: match ? d.lines.map((l) => (l.id === match.id ? { ...l, ...pick } : l)) : [...d.lines, Ln(ql.group, ql.code, ql.desc, ql.ec, ql.cur, ql.basis, ql.rate, { ...pick })] }));
+    toast(match ? `${ql.desc}: rate from the quote` : `${ql.desc} added from the quote`);
+  };
   const addLine = (g) => setD((d) => ({
     lines: [...d.lines, Ln(g, g === "fees" ? "10011" : g === "local" && d.tpl === "imp" ? "30022" : "30050", "", "", "ZAR", "flat", "", { vat: (g === "local" && d.tpl === "imp") || g === "fees", type: g === "fees" ? "R" : "D" })],
   }));
@@ -307,15 +320,7 @@ export default function DocBuilder({ initial, onClose }) {
 
       <div className="oo-builder" style={{ gridTemplateColumns: `minmax(0,${split}fr) 10px minmax(0,${100 - split}fr)` }}>
         <div className="oo-cap">
-          {!isQ && dc.quoteNo && (() => {
-            const q = allDocs.find((x) => x.id === dc.quoteId);
-            return (
-              <div className="oo-note" data-testid="based-on-quote">
-                <b>Based on quote {dc.quoteNo}</b>
-                <span>{q ? `Quoted ${money("ZAR", calc(q).total)} on ${dmy(q.date)} · this pro forma ${money("ZAR", c.total)}` : "Charges and terms copied from the quote."}</span>
-              </div>
-            );
-          })()}
+          {!isQ && dc.quoteNo && <QuoteRef quote={allDocs.find((x) => x.id === dc.quoteId)} no={dc.quoteNo} pfiTotal={c.total} onUse={applyQuoteLine} />}
           {isQ && dc.id && (() => {
             const used = allDocs.filter((x) => x.type === "pfi" && x.quoteId === dc.id);
             if (!used.length && !dc.file) return null;
@@ -613,5 +618,41 @@ export default function DocBuilder({ initial, onClose }) {
       </div>
     </div>,
     document.body,
+  );
+}
+
+/* The quote this file had — shown for reference while doing the pro forma. */
+function QuoteRef({ quote, no, pfiTotal, onUse }) {
+  const [open, setOpen] = useState(true);
+  if (!quote) return <div className="oo-note" data-testid="based-on-quote"><b>Quote {no} for this file</b><span>The quote has been deleted.</span></div>;
+  const qc = calc(quote);
+  const rows = qc.lines.filter((l) => !l.off && (l.zar || num(l.rate)));
+  const facts = [["Date", dmy(quote.date)], ["Status", quote.status], ["Route", [quote.pol, quote.pod].filter(Boolean).join(" → ")], ["Commodity", quote.commodity], ["CBM / KGS", [quote.cbm, quote.kgs].filter(Boolean).join(" / ")], ["Terms", quote.inco]].filter((f) => f[1]);
+  return (
+    <div className="oo-note" style={{ gap: 10 }} data-testid="based-on-quote">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
+        <b>There was a quote for this file: {quote.no}</b>
+        <button type="button" className="oo-link" style={{ fontSize: 12 }} onClick={() => setOpen(!open)}>{open ? "Hide" : "Show quote"}</button>
+      </div>
+      <span>Quoted {money("ZAR", qc.total)} · this pro forma {money("ZAR", pfiTotal)}. Check the quote — use any rate you need.</span>
+      {open && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "10px 12px", borderRadius: 10, background: "var(--panel)", color: "var(--ink)" }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 16px", fontSize: 12 }}>
+            {facts.map(([k, v]) => <span key={k}><span style={{ color: "var(--mute)" }}>{k}</span> {v}</span>)}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            {rows.map((l) => (
+              <div key={l.id} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto auto 40px", gap: 10, alignItems: "center", padding: "5px 0", borderTop: "1px solid var(--line2)", fontSize: 12 }}>
+                <span className="oo-ellipsis">{l.desc}</span>
+                <span className="mono" style={{ color: "var(--ink2)" }}>{l.basis === "pct" ? `${l.rate}%` : `${l.cur} ${fmt(num(l.rate))}${l.basis === "cbm" ? "/cbm" : l.basis === "cntr" ? "/cntr" : ""}`}</span>
+                <span className="mono" style={{ minWidth: 86, textAlign: "right" }}>{money("ZAR", l.zar)}</span>
+                <button type="button" className="oo-link" style={{ fontSize: 12, justifySelf: "end" }} title="Copy this rate into the pro forma" onClick={() => onUse(l)}>Use</button>
+              </div>
+            ))}
+            {!rows.length && <span style={{ fontSize: 12, color: "var(--mute)" }}>No charges on the quote.</span>}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

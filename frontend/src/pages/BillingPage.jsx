@@ -188,7 +188,7 @@ function FilePrompt({ clients, docs, onClose, onPick }) {
       {(chosen || linked.length > 0) && (
         <div className="oo-field" style={{ gap: 8 }} data-testid="quote-choice">
           <span style={{ fontSize: 13, color: "var(--ink)" }}>
-            {linked.length ? `This file has ${linked.length === 1 ? "a quote" : `${linked.length} quotes`} — base the pro forma on it?` : "Base it on a quote?"}
+            {linked.length ? `There was ${linked.length === 1 ? "a quote" : `${linked.length} quotes`} for this file — shown next to the pro forma for reference` : "Was there a quote? Link it to show it next to the pro forma"}
           </span>
           {[...linked, ...unlinked].map((d) => (
             <QuoteOption key={d.id} d={d} on={quoteId === d.id} linked={linked.includes(d)} onClick={() => setQuoteSel(d.id)} />
@@ -200,7 +200,7 @@ function FilePrompt({ clients, docs, onClose, onPick }) {
         <button type="button" className="oo-btn" style={{ marginRight: "auto" }} onClick={() => onPick(null)}>Start blank</button>
         <button type="button" className="oo-btn foot" style={{ padding: "11px 18px" }} onClick={onClose}>Cancel</button>
         <button type="button" className="oo-btn primary foot" style={{ padding: "11px 20px" }} onClick={go} disabled={!chosen && !quote}>
-          {quote ? `Create from ${quote.no}` : "Create pro forma"}
+          Create pro forma
         </button>
       </div>
     </Modal>
@@ -227,7 +227,7 @@ function QuoteOption({ d, on, linked, onClick }) {
           <span className="mono" style={{ fontSize: 13, fontWeight: 500 }}>{money("ZAR", calc(d).total)}</span>
         </>
       ) : (
-        <span style={{ fontSize: 13 }}>No quote — use the standard rate sheet</span>
+        <span style={{ fontSize: 13 }}>No quote</span>
       )}
     </button>
   );
