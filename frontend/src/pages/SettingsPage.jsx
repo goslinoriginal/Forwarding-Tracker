@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { api, OPTIONAL_COLUMNS } from "@/lib/api";
-import { useClients, useRefresh, useSettings } from "@/lib/data";
+import { useClients, useRefresh, useRoe, useSettings } from "@/lib/data";
 import { ENTITIES } from "@/lib/billingCalc";
-import { Seg, Toggle, useChip, useToast } from "@/lib/ui";
+import { Seg, Toggle, dmy, todayIso, useChip, useToast } from "@/lib/ui";
+import RoeModal from "@/components/RoeModal";
 import { useTheme } from "@/lib/theme";
 
 export default function SettingsPage() {
@@ -13,6 +14,9 @@ export default function SettingsPage() {
   const { data: clients = [] } = useClients();
   const { data: settings } = useSettings();
   const [newPreset, setNewPreset] = useState("");
+  const { data: rates = [] } = useRoe();
+  const [roeEdit, setRoeEdit] = useState(null);
+  const [roeAll, setRoeAll] = useState(false);
 
   const update = async (patch) => {
     try {
@@ -43,6 +47,29 @@ export default function SettingsPage() {
           <span style={{ fontSize: 14, fontWeight: 500 }}>Dark mode</span>
           <Toggle size="lg" on={dark} onChange={toggle} title="Toggle dark mode" />
         </div>
+      </section>
+
+      <section className="oo-set" style={{ gap: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap" }}>
+          <div className="oo-card-title"><h2>Rates of exchange</h2><span className="oo-sub">Captured daily and pulled into pro formas: the SOB date's (weekend → next Monday) and the invoice date's.</span></div>
+          <button type="button" className="oo-btn sm" onClick={() => setRoeEdit({ day: todayIso(), existing: null })}>+ Add a day</button>
+        </div>
+        {!rates.length && <span className="oo-sub">No rates captured yet.</span>}
+        {rates.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <div className="oo-grid-head" style={{ gridTemplateColumns: "1.2fr 1fr 1fr 60px", padding: "8px 4px" }}><span>Date</span><span className="r">USD</span><span className="r">EUR</span><span /></div>
+            {(roeAll ? rates : rates.slice(0, 10)).map((r) => (
+              <div key={r.date} className="oo-grid-row" style={{ gridTemplateColumns: "1.2fr 1fr 1fr 60px", padding: "9px 4px", fontSize: 14 }}>
+                <span className="mono">{dmy(r.date)}</span>
+                <span className="mono r">{r.usd || "—"}</span>
+                <span className="mono r">{r.eur || "—"}</span>
+                <button type="button" className="oo-link" style={{ justifySelf: "end" }} onClick={() => setRoeEdit({ day: r.date, existing: r })}>Edit</button>
+              </div>
+            ))}
+            {rates.length > 10 && <button type="button" className="oo-link" style={{ alignSelf: "flex-start", marginTop: 6 }} onClick={() => setRoeAll(!roeAll)}>{roeAll ? "Show fewer" : `Show all ${rates.length} days`}</button>}
+          </div>
+        )}
+        {roeEdit && <RoeModal day={roeEdit.day} existing={roeEdit.existing} onClose={() => setRoeEdit(null)} />}
       </section>
 
       <section className="oo-set">

@@ -730,6 +730,30 @@ async def update_shipment(shipment_id: str, payload: ShipmentUpdate):
     return doc
 
 
+def _workday_on_or_before(d: date) -> date:
+    """We don't work weekends: a Saturday or Sunday falls back to the Friday."""
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    return d
+
+
+def _prev_workday(d: date) -> date:
+    return _workday_on_or_before(d - timedelta(days=1))
+
+
+def _workdays_until(today: date, due: date) -> int:
+    """Working days from today to the due date; negative once it has passed."""
+    step = 1 if due >= today else -1
+    n, d = 0, today
+    while d != due:
+        d += timedelta(days=step)
+        if d.weekday() < 5:
+            n += step
+    if due < today and n == 0:
+        n = -1  # e.g. due Friday, looked at on the weekend
+    return n
+
+
 def _reminder_for_shipment(s: dict, today: date) -> Optional[dict]:
     """Return reminder metadata if this shipment needs cargo reporting soon.
     Once a reminder for a given target_date is acknowledged (cargo_report_ack_date
@@ -746,9 +770,7 @@ def _reminder_for_shipment(s: dict, today: date) -> Optional[dict]:
             target = date.fromisoformat(target_iso)
         except Exception:
             return None
-        days = (target - today).days
-        if days > 10:
-            return None
+        report_by = _workday_on_or_before(target - timedelta(days=10))
         kind = "LCL cargo report (10d before ETA)"
     else:
         # FCL: use second vessel if present, else primary. Once that vessel has
@@ -769,12 +791,13 @@ def _reminder_for_shipment(s: dict, today: date) -> Optional[dict]:
             target = date.fromisoformat(target_iso)
         except Exception:
             return None
-        days = (target - today).days
-        if days > 2:
-            return None
+        report_by = _workday_on_or_before(target - timedelta(days=2))
+    # Show from one working day before it's due, as a heads-up
+    if today < _prev_workday(report_by):
+        return None
     if s.get("cargo_report_ack_date") == target_iso:
         return None
-    return {"kind": kind, "target_date": target_iso, "days_left": days}
+    return {"kind": kind, "target_date": target_iso, "report_by": report_by.isoformat(), "days_left": _workdays_until(today, report_by)}
 
 
 @api_router.get("/dashboard/reminders")
@@ -2106,6 +2129,39 @@ async def _get_settings() -> dict:
         "export_format": doc.get("export_format") or "PDF + Excel",
         "quick_comments": doc.get("quick_comments") if doc.get("quick_comments") is not None else list(DEFAULT_QUICK_COMMENTS),
     }
+
+
+# ----- Rates of exchange (captured once a day from the boss's rates) -----
+def _roe_day(iso: str) -> str:
+    """A Saturday or Sunday uses the following Monday's ROE."""
+    d = date.fromisoformat(iso)
+    while d.weekday() >= 5:
+        d += timedelta(days=1)
+    return d.isoformat()
+
+
+@api_router.get("/roe")
+async def list_roe():
+    rows = await db.roe.find({}, _proj()).sort("date", -1).to_list(2000)
+    return {"today": date.today().isoformat(), "rates": rows}
+
+
+@api_router.put("/roe/{day}")
+async def save_roe(day: str, payload: dict):
+    try:
+        day = _roe_day(day)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Use a YYYY-MM-DD date")
+    clean = lambda v: str(v or "").strip().replace(",", ".")
+    row = {"date": day, "usd": clean(payload.get("usd")), "eur": clean(payload.get("eur")), "updated_at": _now_iso()}
+    await db.roe.update_one({"date": day}, {"$set": row}, upsert=True)
+    return row
+
+
+@api_router.delete("/roe/{day}")
+async def delete_roe(day: str):
+    await db.roe.delete_one({"date": day})
+    return {"ok": True}
 
 
 @api_router.get("/settings")

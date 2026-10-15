@@ -15,6 +15,21 @@ export const useReminders = () =>
 export const useReportLog = () =>
   useQuery({ queryKey: ["report-log", todayIso()], queryFn: async () => (await api.get("/report-log", { params: { date: todayIso() } })).data });
 
+export const useRoe = () =>
+  useQuery({ queryKey: ["roe"], queryFn: async () => (await api.get("/roe")).data.rates });
+
+/** A Saturday or Sunday uses the following Monday's ROE. */
+export function roeDay(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || "");
+  if (!m) return "";
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** The captured rates that apply to a date: { date, usd, eur } or null. */
+export const roeFor = (rates, iso) => (rates || []).find((r) => r.date === roeDay(iso)) || null;
+
 export const useSettings = () =>
   useQuery({ queryKey: ["settings"], queryFn: async () => (await api.get("/settings")).data });
 

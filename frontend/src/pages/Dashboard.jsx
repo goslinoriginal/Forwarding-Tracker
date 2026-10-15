@@ -7,8 +7,8 @@ import { useEditor } from "@/components/ShipmentEditor";
 const REMINDER_COLS = "44px 1.2fr 80px 1.3fr 1.4fr 64px 1.5fr 72px 96px 60px";
 
 function triggerText(r) {
-  if ((r.cargo_type || "FCL").toUpperCase() === "LCL") return "LCL · 10 days before ETA";
-  return (r.kind || "").includes("2nd vessel") ? "FCL · 2 days before ETD (2nd vessel)" : "FCL · 2 days before ETD";
+  if ((r.cargo_type || "FCL").toUpperCase() === "LCL") return `10 days before ETA ${dm(r.target_date)}`;
+  return `2 days before ${(r.kind || "").includes("2nd vessel") ? "2nd vessel ETD" : "ETD"} ${dm(r.target_date)}`;
 }
 
 function DaysPill({ days }) {
@@ -116,13 +116,13 @@ export default function Dashboard() {
           <div className="oo-card-head">
             <div className="oo-card-title">
               <h2 className="oo-h2">Cargo reporting due</h2>
-              <span className="oo-sub">Tick once reported and it clears. FCL: 2 days before ETD (2nd vessel if transhipment) · LCL: 10 days before ETA</span>
+              <span className="oo-sub">Tick once reported and it clears. FCL: 2 days before ETD (2nd vessel if transhipment) · LCL: 10 days before ETA · a weekend moves back to the Friday</span>
             </div>
           </div>
           <div style={{ overflowX: "auto" }}>
             <div style={{ minWidth: 1000 }}>
               <div className="oo-grid-head" style={{ gridTemplateColumns: REMINDER_COLS, gap: 12, padding: "10px 24px", borderTop: "1px solid var(--line2)", borderBottom: "none" }}>
-                <span>Done</span><span>Client</span><span>File #</span><span>Supplier</span><span>Vessel</span><span>Type</span><span>Trigger</span><span className="r">Target</span><span className="r">Days left</span><span />
+                <span>Done</span><span>Client</span><span>File #</span><span>Supplier</span><span>Vessel</span><span>Type</span><span>Trigger</span><span className="r">Report by</span><span className="r">Working days</span><span />
               </div>
               {reminders.map((r, i) => (
                 <div key={r.shipment_id} className="oo-grid-row" style={{ gridTemplateColumns: REMINDER_COLS, gap: 12, padding: "12px 24px", borderTop: "1px solid var(--line2)", borderBottom: "none", fontSize: 14, animationDelay: `${Math.min(i, 12) * 30}ms` }}>
@@ -133,7 +133,7 @@ export default function Dashboard() {
                   <span className="oo-ellipsis" style={{ color: "var(--ink2)", fontSize: 13 }}>{r.vessel_name || "—"}</span>
                   <Pill hue={CARGO_HUE[r.cargo_type] ?? 255} size="xs" style={{ fontFamily: "var(--mono)" }}>{r.cargo_type}</Pill>
                   <span style={{ fontSize: 13, color: "var(--mute)" }}>{triggerText(r)}</span>
-                  <span className="mono r" style={{ fontSize: 13, color: "var(--ink2)" }}>{dm(r.target_date)}</span>
+                  <span className="mono r" style={{ fontSize: 13, color: "var(--ink2)" }}>{dm(r.report_by || r.target_date)}</span>
                   <DaysPill days={r.days_left} />
                   <button type="button" className="oo-link" style={{ justifySelf: "end" }} onClick={() => openEditor(r.client_id, r.shipment_id)}>Open →</button>
                 </div>

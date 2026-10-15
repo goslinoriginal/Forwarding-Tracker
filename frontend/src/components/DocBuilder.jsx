@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "@/lib/api";
-import { clientEmail, shipmentLegs, useClients, useRefresh, useShipments } from "@/lib/data";
+import { clientEmail, roeDay, roeFor, shipmentLegs, useClients, useRefresh, useRoe, useShipments } from "@/lib/data";
 import {
   DEF_OF, ENTITIES, GROUPS, INCO, Ln, PFI_TERMS, QUOTE_TERMS, SYM, TPL, calc, ecDesc, fmt, money, num, parseOrder,
 } from "@/lib/billingCalc";
@@ -56,6 +56,7 @@ export default function DocBuilder({ initial, onClose }) {
   const refresh = useRefresh();
   const { data: clients = [] } = useClients();
   const { data: ships = [] } = useShipments();
+  const { data: rates = [] } = useRoe();
   const [dc, setDc] = useState(initial);
   const [tab, setTab] = useState("doc");
   const [split, setSplit] = useState(readSplit);
@@ -67,6 +68,28 @@ export default function DocBuilder({ initial, onClose }) {
     window.addEventListener("keydown", onKey);
     return () => { window.removeEventListener("keydown", onKey); clearTimeout(copyTimer.current); };
   }, [onClose]);
+
+  // ROE comes from the rates captured each day: the SOB date's (a weekend SOB uses
+  // the next Monday) and the invoice date's. Anything typed by hand is left alone.
+  useEffect(() => {
+    if (dc.status !== "Draft") return;
+    setDc((d) => {
+      const auto = d.roeAuto || {};
+      const sobR = roeFor(rates, d.sob);
+      const dayR = roeFor(rates, d.date);
+      const want = { usdSob: sobR?.usd, eurSob: sobR?.eur, usdToday: dayR?.usd, eurToday: dayR?.eur };
+      const patch = {};
+      const next = { ...auto };
+      Object.entries(want).forEach(([k, v]) => {
+        const cur = d[k] || "";
+        if (cur && cur !== auto[k]) return;
+        next[k] = v || "";
+        if (next[k] !== cur) patch[k] = next[k];
+      });
+      if (!Object.keys(patch).length && Object.keys(next).every((k) => next[k] === auto[k])) return d;
+      return { ...d, ...patch, roeAuto: next };
+    });
+  }, [rates, dc.sob, dc.date, dc.status]);
 
   const setD = (patch) => setDc((d) => ({ ...d, ...(typeof patch === "function" ? patch(d) : patch) }));
   const setLine = (id, patch) => setD((d) => ({ lines: d.lines.map((l) => (l.id === id ? { ...l, ...patch } : l)) }));
@@ -92,6 +115,13 @@ export default function DocBuilder({ initial, onClose }) {
   };
   const guard = (fn) => async () => { try { await fn(); } catch { toast("Couldn't save the document", { error: true }); } };
 
+  const guardRoe = (day, usd, eur) => async () => {
+    try {
+      await api.put(`/roe/${day}`, { usd, eur });
+      await refresh("roe");
+      toast(`ROE saved for ${dmy(day)}`);
+    } catch { toast("Couldn't save the ROE", { error: true }); }
+  };
   const onSave = guard(async () => { const d = await save(); toast(`${tl} ${d.no} saved`); });
   const onSend = guard(async () => {
     const d = await save({ status: dc.status === "Draft" ? "Sent" : dc.status });
@@ -308,8 +338,24 @@ export default function DocBuilder({ initial, onClose }) {
           <section className="oo-sec">
             <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
               <h3>Rates of exchange</h3>
-              <span style={{ fontSize: 12, color: "var(--mute)" }}>The higher of SOB-date and today’s ROE is used, plus the markup.{dc.sob ? ` SOB date: ${dmy(dc.sob)}.` : ""}</span>
+              <span style={{ fontSize: 12, color: "var(--mute)" }}>The higher of SOB-date and today’s ROE is used, plus the markup. Filled from the daily rates you capture.</span>
             </div>
+            {[["SOB date", dc.sob, "usdSob", "eurSob"], ["Invoice date", dc.date, "usdToday", "eurToday"]].filter(([, iso]) => iso).map(([label, iso, uk, ek]) => {
+              const day = roeDay(iso);
+              const got = roeFor(rates, iso);
+              const typed = (dc[uk] || dc[ek]) && !got;
+              return (
+                <div key={label} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", fontSize: 12, color: "var(--ink2)" }}>
+                  <span>
+                    {label} {dmy(iso)}{day !== iso ? ` (weekend → Monday ${dmy(day)})` : ""}:{" "}
+                    {got ? <b className="mono">{[got.usd && `$ ${got.usd}`, got.eur && `€ ${got.eur}`].filter(Boolean).join(" · ")}</b> : <span style={{ color: "var(--amb-fg)" }}>no ROE captured for {dmy(day)}</span>}
+                  </span>
+                  {typed && (
+                    <button type="button" className="oo-link" onClick={guardRoe(day, dc[uk], dc[ek])}>Save typed rates as {dmy(day)}’s ROE</button>
+                  )}
+                </div>
+              );
+            })}
             <div className="oo-autogrid">
               <F label="USD · SOB date ROE"><input className="oo-input b" value={dc.usdSob} onChange={on("usdSob")} placeholder="0.0000" inputMode="decimal" /></F>
               <F label="USD · today’s ROE"><input className="oo-input b" value={dc.usdToday} onChange={on("usdToday")} placeholder="0.0000" inputMode="decimal" /></F>
