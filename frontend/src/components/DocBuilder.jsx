@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "@/lib/api";
-import { clientEmail, clientEmailLabel, composeEmail, roeDay, roeFor, shipmentLegs, useClients, useDocuments, useRefresh, useRoe, useShipments } from "@/lib/data";
+import { clientEmail, clientEmailLabel, composeEmail, getMailApp, roeDay, roeFor, shipmentLegs, useClients, useDocuments, useRefresh, useRoe, useShipments } from "@/lib/data";
 import {
   DEF_OF, ENTITIES, GROUPS, INCO, Ln, PFI_TERMS, QUOTE_TERMS, SYM, TPL, calc, dotDecimal, ecDesc, equipmentText, fmt, money, num, parseOrder,
 } from "@/lib/billingCalc";
@@ -155,9 +155,9 @@ export default function DocBuilder({ initial, onClose }) {
     const d = await save({ status: dc.status === "Draft" ? "Sent" : dc.status });
     const to = clientEmail(client);
     if (to) {
-      composeEmail({ to, cc: client.email_cc, subject: `${tl} ${d.no} – ${client.name}`, body: `Dear ${client.email_greeting || client.name},\n\nPlease find attached ${isQ ? "our quotation" : "the pro forma invoice"} ${d.no} (total ${money("ZAR", c.total)} incl. VAT).\n\nKind regards.` });
+      await composeEmail({ to, cc: client.email_cc, subject: `${tl} ${d.no} – ${client.name}`, body: `Dear ${client.email_greeting || client.name},\n\nPlease find attached ${isQ ? "our quotation" : "the pro forma invoice"} ${d.no} (total ${money("ZAR", c.total)} incl. VAT).\n\nKind regards.` });
     }
-    toast(`${tl} ${d.no} marked sent${to ? ` · email to ${to} opened — attach the PDF` : ""}`);
+    toast(`${tl} ${d.no} marked sent${to ? ` · email opened — ${getMailApp() === "mailto" ? "Ctrl+V pastes the message above your signature, then " : ""}attach the PDF` : ""}`);
   });
   const onDownload = guard(async () => {
     const d = await save();

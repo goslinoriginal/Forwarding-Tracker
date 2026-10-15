@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, API } from "@/lib/api";
 import { nextWorkday } from "@/lib/holidays";
-import { dm, todayIso } from "@/lib/ui";
+import { copyText, dm, todayIso } from "@/lib/ui";
 
 /* ---------- Queries ---------- */
 export const useClients = () =>
@@ -123,10 +123,11 @@ export function parseRecipients(text) {
   return out;
 }
 const mergeRecipients = (...lists) => parseRecipients(lists.filter(Boolean).join(";"));
-const MAX_MAILTO = 2000; // Windows won't pass longer mailto links to Outlook
 
-/** Opens a ready-to-send email: To, CC, subject and body filled in. */
-export function composeEmail({ to, cc, subject, body }) {
+/** Opens a ready-to-send email with To, CC and subject filled in.
+ *  Outlook desktop leaves out your signature when an app fills in the message, so there
+ *  the message is copied to the clipboard instead — paste it above the signature (Ctrl+V). */
+export async function composeEmail({ to, cc, subject, body }) {
   const toL = parseRecipients(to).map((r) => r.email);
   const ccL = parseRecipients(cc).filter((r) => !toL.includes(r.email)).map((r) => r.email);
   if (getMailApp() === "owa") {
@@ -137,15 +138,10 @@ export function composeEmail({ to, cc, subject, body }) {
     window.open(`https://outlook.office.com/mail/deeplink/compose?${q}`, "_blank", "noopener");
     return { ok: true };
   }
-  const build = (b) => {
-    const params = [["cc", ccL.join(";")], ["subject", subject], ["body", b]].filter(([, v]) => v).map(([k, v]) => `${k}=${encodeURIComponent(v)}`);
-    return `mailto:${toL.join(";")}?${params.join("&")}`;
-  };
-  let url = build(body);
-  let trimmed = false;
-  if (url.length > MAX_MAILTO) { url = build(""); trimmed = true; } // a very long message: paste it in yourself
-  window.location.href = url;
-  return { ok: true, trimmed };
+  if (body) await copyText(body);
+  const params = [["cc", ccL.join(";")], ["subject", subject]].filter(([, v]) => v).map(([k, v]) => `${k}=${encodeURIComponent(v)}`);
+  window.location.href = `mailto:${toL.join(";")}?${params.join("&")}`;
+  return { ok: true, pasted: !!body };
 }
 
 /** Fills {name} and {client} in a subject or message template. */

@@ -67,7 +67,7 @@ export default function SettingsPage() {
         <span style={{ fontSize: 13, color: "var(--ink2)", lineHeight: 1.5 }}>
           {mailApp === "owa"
             ? "Opens a new email in a browser tab at outlook.office.com — the mailbox you're already signed into, so there's no sign-in screen."
-            : "Opens a new email in Outlook (classic). If the new Outlook opens instead (or asks you to sign in), set it once in Windows: Settings → Apps → Default apps → search “mailto” → choose Outlook (classic)."}
+            : "Opens a new email in Outlook (classic) with your signature, and copies the message so Ctrl+V pastes it above the signature. If the new Outlook opens instead (or asks you to sign in), set it once in Windows: Settings → Apps → Default apps → search “mailto” → choose Outlook (classic)."}
         </span>
         <div className="oo-card-title" style={{ paddingTop: 10, borderTop: "1px solid var(--line2)" }}>
           <h2 style={{ fontSize: 16 }}>Added to every status report email</h2>
