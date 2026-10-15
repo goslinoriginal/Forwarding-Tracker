@@ -55,17 +55,19 @@ export default function ClientDetail() {
     .filter((s) => !q || [s.supplier, s.tracking_doc_number, s.file_number, s.order_booking_file, ...shipmentLegs(s).map((l) => l.name)].join(" ").toLowerCase().includes(q));
   const sentT = sent[client.id];
 
-  const gc = ["72px", "minmax(160px,1.3fr)", "104px", "minmax(150px,1.2fr)"];
+  const gc = ["72px", "minmax(130px,1.3fr)", "104px", "minmax(130px,1.2fr)"];
   if (cols.sob_date) gc.push("72px");
   if (cols.pol) gc.push("90px");
   gc.push("64px", "64px");
   if (cols.final_destination) gc.push("110px");
-  gc.push("minmax(180px,1.6fr)");
+  gc.push("minmax(120px,1.6fr)");
   if (cols.copy_docs_status) gc.push("120px");
   if (cols.hbill_released) gc.push("52px");
   if (cols.expected_freight_rate) gc.push("100px");
   gc.push("14px");
   const gridCols = gc.join(" ");
+  // Scroll width = every column at its minimum, so nothing is clipped on narrow screens
+  const tableMin = Math.max(900, gc.reduce((a, t) => a + parseInt(t.replace("minmax(", ""), 10), 0) + (gc.length - 1) * 14 + 40);
 
   const setCol = async (key) => {
     const next = { ...cols, [key]: !cols[key] };
@@ -130,7 +132,7 @@ export default function ClientDetail() {
       </div>
 
       <div className="oo-card scroll">
-        <div style={{ minWidth: 1080 }}>
+        <div style={{ minWidth: tableMin }}>
           <div className="oo-grid-head" style={{ gridTemplateColumns: gridCols }}>
             <span>File #</span><span>Supplier · Order</span><span>Status</span><span>Vessel · Doc</span>
             {cols.sob_date && <span>SOB / RCG</span>}

@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTheme } from "@/lib/theme";
 
 /* ---------- Hue chips ----------
@@ -61,13 +62,15 @@ export function Modal({ onClose, children }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
-  return (
+  // Portalled to <body> so the page's entrance animation can't offset it.
+  return createPortal(
     <>
       <div className="oo-scrim" onClick={onClose} />
       <div className="oo-modal-wrap">
         <div className="oo-modal">{children}</div>
       </div>
-    </>
+    </>,
+    document.body,
   );
 }
 

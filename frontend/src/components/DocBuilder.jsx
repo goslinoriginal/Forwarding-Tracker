@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { api } from "@/lib/api";
 import { clientEmail, useClients, useRefresh, useShipments } from "@/lib/data";
 import {
@@ -185,7 +186,8 @@ export default function DocBuilder({ initial, onClose }) {
   const markEntered = (id, v) => setD((d) => ({ entered: { ...(d.entered || {}), [id]: v } }));
   const doneN = live.filter((l) => entered[l.id]).length;
 
-  return (
+  // Portalled to <body> so the page's entrance animation can't offset the sheet.
+  return createPortal(
     <div className="oo-sheet doc" data-screen-label="Quote / pro forma builder">
       <header className="oo-sheet-head" style={{ padding: "14px 24px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16, minWidth: 0, flexWrap: "wrap" }}>
@@ -453,6 +455,7 @@ export default function DocBuilder({ initial, onClose }) {
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

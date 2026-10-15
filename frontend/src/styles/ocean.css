@@ -38,7 +38,7 @@
   --toast: oklch(0.23 0.035 258);
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
   --mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  --logo: url("/brand/lockup-color.png");
+  --logo: url("../assets/lockup-color.png");
   color-scheme: light;
 }
 
@@ -76,7 +76,7 @@ html[data-theme="dark"] {
   --sh: none;
   --sh-pop: 0 30px 80px -20px rgba(0, 0, 0, 0.55);
   --toast: #0d275c;
-  --logo: url("/brand/lockup-white.png");
+  --logo: url("../assets/lockup-white.png");
   color-scheme: dark;
 }
 
@@ -335,7 +335,7 @@ textarea.oo-input { line-height: 1.5; resize: none; }
   background: transparent; transition: background 0.2s; animation: fadeUp 0.35s var(--ease) both;
 }
 .oo-rail-item:hover, .oo-rail-item.on { background: var(--accent-soft); }
-.oo-edit-card { flex: 1; min-height: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 20px; padding: 20px 22px; display: flex; flex-direction: column; gap: 14px; box-shadow: var(--sh); }
+.oo-edit-card { flex: 1 0 auto; background: var(--panel); border: 1px solid var(--line); border-radius: 20px; padding: 20px 22px; display: flex; flex-direction: column; gap: 14px; box-shadow: var(--sh); }
 .oo-form4 { flex: none; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 16px; }
 .oo-leg { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) 32px; gap: 12px 16px; align-items: end; padding: 10px 12px; border-radius: 14px; background: var(--sub); border: 1px solid var(--line2); animation: popIn 0.25s var(--ease) both; }
 .oo-x { width: 32px; height: 38px; border: none; background: none; color: var(--mute); font-size: 18px; border-radius: 10px; transition: all 0.2s; }

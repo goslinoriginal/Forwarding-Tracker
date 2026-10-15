@@ -260,7 +260,7 @@ function ShipmentEditor({ clientId, shipId, onClose }) {
         </nav>
 
         <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: "auto", padding: "18px 24px", display: "flex", flexDirection: "column" }}>
-          <div key={editId} style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", gap: 14, animation: "fadeUp .35s var(--ease) both" }}>
+          <div key={editId} style={{ flex: "1 0 auto", display: "flex", flexDirection: "column", gap: 14, animation: "fadeUp .35s var(--ease) both" }}>
             <div style={{ flex: "none", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                 <span className="oo-sub">{idx + 1} / {railIds.length}</span>
@@ -292,7 +292,9 @@ function ShipmentEditor({ clientId, shipId, onClose }) {
                   </div>
                 </Field>
 
-                <Field label="Order" span={2}><input className="oo-input" value={fm.order_booking_file} onChange={set("order_booking_file")} /></Field>
+                <Field label="Order" span={2}>
+                  <textarea className="oo-input" rows={Math.min(4, Math.max(1, fm.order_booking_file.split("\n").length))} value={fm.order_booking_file} onChange={set("order_booking_file")} />
+                </Field>
                 <Field label="Carrier">
                   <select className="oo-input" value={fm.carrier} onChange={set("carrier")}>
                     {CARRIERS.map((c) => <option key={c} value={c}>{c}</option>)}
