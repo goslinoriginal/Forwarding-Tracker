@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "@/lib/api";
-import { clientEmail, clientEmailLabel, composeEmail, roeDay, roeFor, shipmentLegs, useClients, useRefresh, useRoe, useShipments } from "@/lib/data";
+import { clientEmail, clientEmailLabel, composeEmail, roeDay, roeFor, shipmentLegs, useClients, useDocuments, useRefresh, useRoe, useShipments } from "@/lib/data";
 import {
   DEF_OF, ENTITIES, GROUPS, INCO, Ln, PFI_TERMS, QUOTE_TERMS, SYM, TPL, calc, dotDecimal, ecDesc, equipmentText, fmt, money, num, parseOrder,
 } from "@/lib/billingCalc";
@@ -52,12 +52,34 @@ export function fromShipment(s, client) {
   };
 }
 
+const QUOTE_CARRY = ["tpl", "markup", "commodity", "pol", "pod", "via", "transit", "freq", "inco", "cntrs", "jhb", "ref", "att", "prep", "cbm", "kgs", "equipment"];
+
+/** A pro forma based on an accepted quote: the quote's charges and terms, with the
+ *  shipment's actual details from the status report on top. */
+export function pfiFromQuote(quote, ship, client) {
+  const base = Object.fromEntries(QUOTE_CARRY.filter((k) => quote[k] !== undefined).map((k) => [k, quote[k]]));
+  const fill = ship ? fromShipment(ship, client) : {};
+  delete fill.cargoTpl;
+  const shipVals = Object.fromEntries(Object.entries(fill).filter(([, v]) => v !== "" && v !== false));
+  return {
+    ...base,
+    clientId: quote.clientId,
+    entity: quote.entity,
+    ...shipVals,
+    file: ship?.file_number || quote.file || "",
+    lines: (quote.lines || []).map((l) => ({ ...l })),
+    quoteId: quote.id,
+    quoteNo: quote.no,
+  };
+}
+
 export default function DocBuilder({ initial, onClose }) {
   const toast = useToast();
   const refresh = useRefresh();
   const { data: clients = [] } = useClients();
   const { data: ships = [] } = useShipments();
   const { data: rates = [] } = useRoe();
+  const { data: allDocs = [] } = useDocuments();
   const [dc, setDc] = useState(initial);
   const [tab, setTab] = useState("doc");
   const [split, setSplit] = useState(readSplit);
@@ -148,10 +170,15 @@ export default function DocBuilder({ initial, onClose }) {
     toast(`Choose "Save as PDF" to keep ${d.no}.pdf`);
   });
   const onConvert = guard(async () => {
-    await save({ status: "Accepted" });
+    const q = await save({ status: "Accepted" });
     const no = await nextDocNumber("pfi");
-    setDc((d) => ({ ...d, id: null, type: "pfi", no, date: isoPlusDays(0), until: isoPlusDays(7), notes: PFI_TERMS, status: "Draft", entered: {}, lines: d.lines.map((l) => ({ ...l })) }));
-    toast(`Quote accepted · pro forma ${no} created`);
+    const ship = dc.file ? ships.find((x) => x.client_id === dc.clientId && x.file_number === dc.file) : null;
+    setDc((d) => ({
+      ...d, ...pfiFromQuote({ ...d, id: q.id, no: q.no }, ship, client),
+      id: null, type: "pfi", no, date: isoPlusDays(0), until: isoPlusDays(7), notes: PFI_TERMS, status: "Draft", entered: {},
+      usdSob: "", usdToday: "", eurSob: "", eurToday: "", roeAuto: {},
+    }));
+    toast(`Quote ${q.no} accepted · pro forma ${no} created from it`);
   });
   const onDelete = guard(async () => {
     const old = dc;
@@ -280,6 +307,25 @@ export default function DocBuilder({ initial, onClose }) {
 
       <div className="oo-builder" style={{ gridTemplateColumns: `minmax(0,${split}fr) 10px minmax(0,${100 - split}fr)` }}>
         <div className="oo-cap">
+          {!isQ && dc.quoteNo && (() => {
+            const q = allDocs.find((x) => x.id === dc.quoteId);
+            return (
+              <div className="oo-note" data-testid="based-on-quote">
+                <b>Based on quote {dc.quoteNo}</b>
+                <span>{q ? `Quoted ${money("ZAR", calc(q).total)} on ${dmy(q.date)} · this pro forma ${money("ZAR", c.total)}` : "Charges and terms copied from the quote."}</span>
+              </div>
+            );
+          })()}
+          {isQ && dc.id && (() => {
+            const used = allDocs.filter((x) => x.type === "pfi" && x.quoteId === dc.id);
+            if (!used.length && !dc.file) return null;
+            return (
+              <div className="oo-note">
+                <b>{dc.file ? `Linked to file ${dc.file}` : "Not linked to a file yet"}</b>
+                <span>{used.length ? `Used for pro forma ${used.map((x) => x.no).join(", ")}` : "New pro formas for this file will offer to use this quote."}</span>
+              </div>
+            );
+          })()}
           <section className="oo-sec">
             <h3>Details</h3>
             <div className="oo-autogrid">
@@ -313,11 +359,18 @@ export default function DocBuilder({ initial, onClose }) {
               <span style={{ fontSize: 12, color: "var(--mute)" }}>Link a file to fill the route. CBM and kgs drive per-cbm charges (chargeable = greater of cbm or kgs ÷ 1000).</span>
             </div>
             <div className="oo-autogrid">
-              <F label="Linked file #">
-                <select className="oo-input b" value={dc.file} onChange={(e) => setFile(e.target.value)}>
-                  <option value="">None</option>
-                  {shipsFor.filter((s) => s.file_number).map((s) => <option key={s.id} value={s.file_number}>{[s.file_number, s.supplier || s.end_client].filter(Boolean).join(" · ")}</option>)}
-                </select>
+              <F label={isQ ? "Linked file # (once accepted)" : "Linked file #"}>
+                <input
+                  className="oo-input b mono"
+                  list="oo-file-options"
+                  value={dc.file || ""}
+                  onChange={(e) => (isQ ? setD({ file: e.target.value.trim() }) : setFile(e.target.value.trim()))}
+                  placeholder={isQ ? "Type when the client accepts" : "File number"}
+                  data-testid="doc-file"
+                />
+                <datalist id="oo-file-options">
+                  {shipsFor.filter((s) => s.file_number).map((s) => <option key={s.id} value={s.file_number}>{s.supplier || s.end_client || ""}</option>)}
+                </datalist>
               </F>
               <F label="Commodity"><input className="oo-input b" value={dc.commodity} onChange={on("commodity")} placeholder="e.g. Pumps (non haz)" /></F>
               <F label="Containers"><input className="oo-input b" value={dc.equipment || ""} onChange={on("equipment")} placeholder="e.g. 2x20' FCLs / 1x40' HC LCL" /></F>

@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import InvoiceTotals from "@/components/InvoiceTotals";
-import { pinSort, useClients, useDocuments, useShipments } from "@/lib/data";
+import { pinSort, useClients, useDocuments, useRefresh, useShipments } from "@/lib/data";
 import { calc, makeDoc, money } from "@/lib/billingCalc";
 import { DOC_STATUS_HUE, DOC_TYPE_HUE, Modal, Pill, Seg, dmy, useToast } from "@/lib/ui";
-import DocBuilder, { fromShipment, nextDocNumber } from "@/components/DocBuilder";
+import DocBuilder, { fromShipment, nextDocNumber, pfiFromQuote } from "@/components/DocBuilder";
+import { api } from "@/lib/api";
 
 const COLS = "minmax(170px,1.4fr) 104px 96px minmax(150px,1.3fr) 76px 96px 130px 96px 20px";
 const FILTERS = ["All", "Quotes", "Pro formas"];
@@ -30,10 +31,20 @@ export default function BillingPage() {
     .slice()
     .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
-  const newDoc = async (type, ship) => {
+  const refresh = useRefresh();
+  const newDoc = async (type, ship, quote) => {
     try {
       const no = await nextDocNumber(type);
-      if (ship) {
+      if (quote) {
+        const client = clients.find((x) => x.id === quote.clientId);
+        setOpen(makeDoc(quote.tpl || "fcl", type, { no, ...pfiFromQuote(quote, ship, client) }));
+        // The client accepted it: link the quote to this file and mark it accepted
+        const file = ship?.file_number || quote.file || "";
+        if (quote.file !== file || quote.status !== "Accepted") {
+          await api.put(`/documents/${quote.id}`, { ...quote, file, status: "Accepted" });
+          refresh("documents");
+        }
+      } else if (ship) {
         const { cargoTpl, ...fill } = fromShipment(ship, clients.find((x) => x.id === ship.client_id));
         setOpen(makeDoc(cargoTpl, type, { no, ...fill }));
       } else {
@@ -81,7 +92,10 @@ export default function BillingPage() {
               onClick={() => setOpen({ ...d, lines: (d.lines || []).map((l) => ({ ...l })) })}
             >
               <span className="oo-ellipsis" style={{ fontWeight: 600 }}>{nameOf(d.clientId) || "—"}</span>
-              <span className="mono" style={{ fontSize: 13, fontWeight: 500 }}>{d.no}</span>
+              <span style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                <span className="mono" style={{ fontSize: 13, fontWeight: 500 }}>{d.no}</span>
+                {d.quoteNo && <span style={{ fontSize: 11, color: "var(--mute)" }}>from {d.quoteNo}</span>}
+              </span>
               <Pill hue={DOC_TYPE_HUE[d.type]}>{d.type === "quote" ? "Quote" : "Pro forma"}</Pill>
               <span className="oo-ellipsis" style={{ color: "var(--ink2)", fontSize: 13 }}>{[d.pol, d.pod].filter(Boolean).join(" → ") || "—"}</span>
               <span className="mono" style={{ fontSize: 13, color: "var(--ink2)" }}>{d.file || "—"}</span>
@@ -106,7 +120,8 @@ export default function BillingPage() {
         <FilePrompt
           clients={clients}
           onClose={() => setAsking(false)}
-          onPick={(ship) => { setAsking(false); newDoc("pfi", ship); }}
+          docs={docs}
+          onPick={(ship, quote) => { setAsking(false); newDoc("pfi", ship, quote); }}
         />
       )}
       {open && <DocBuilder key={open.id || open.no} initial={open} onClose={() => setOpen(null)} />}
@@ -116,7 +131,7 @@ export default function BillingPage() {
 
 /* "New pro forma" asks for the file number first and fills the pro forma from
    that shipment on the status report (client, order, kgs/cbm, route, vessel, SOB). */
-function FilePrompt({ clients, onClose, onPick }) {
+function FilePrompt({ clients, docs, onClose, onPick }) {
   const { data: ships = [] } = useShipments();
   const [file, setFile] = useState("");
   const [pick, setPick] = useState(0);
@@ -124,7 +139,14 @@ function FilePrompt({ clients, onClose, onPick }) {
   const hits = q ? ships.filter((s) => (s.file_number || "").trim().toLowerCase() === q) : [];
   const nameOf = (id) => clients.find((c) => c.id === id)?.name || "—";
   const chosen = hits[Math.min(pick, hits.length - 1)];
-  const go = () => { if (chosen) onPick(chosen); };
+  // Quotes already linked to this file, then this client's quotes not linked to any file yet
+  const quotes = (docs || []).filter((d) => d.type === "quote").sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  const linked = q ? quotes.filter((d) => (d.file || "").trim().toLowerCase() === q && (!chosen || d.clientId === chosen.client_id)) : [];
+  const unlinked = chosen ? quotes.filter((d) => d.clientId === chosen.client_id && !(d.file || "").trim()).slice(0, 5) : [];
+  const [quoteSel, setQuoteSel] = useState(null); // null = default (the linked quote, if any); "" = rate sheet
+  const quoteId = quoteSel ?? (linked[0]?.id || "");
+  const quote = quotes.find((d) => d.id === quoteId) || null;
+  const go = () => { if (chosen || quote) onPick(chosen || null, quote); };
 
   return (
     <Modal onClose={onClose}>
@@ -137,7 +159,7 @@ function FilePrompt({ clients, onClose, onPick }) {
         <input
           className="oo-input big mono"
           value={file}
-          onChange={(e) => { setFile(e.target.value); setPick(0); }}
+          onChange={(e) => { setFile(e.target.value); setPick(0); setQuoteSel(null); }}
           onKeyDown={(e) => { if (e.key === "Enter") go(); }}
           placeholder="e.g. 158373"
           inputMode="numeric"
@@ -145,7 +167,7 @@ function FilePrompt({ clients, onClose, onPick }) {
           data-testid="pfi-file-input"
         />
       </label>
-      {q && !hits.length && <span className="oo-sub">No shipment on the status reports has file number {file.trim()}.</span>}
+      {q && !hits.length && <span className="oo-sub">No shipment on the status reports has file number {file.trim()}{linked.length ? " — you can still use the quote linked to it." : "."}</span>}
       {hits.map((s, i) => (
         <button
           key={s.id}
@@ -163,13 +185,50 @@ function FilePrompt({ clients, onClose, onPick }) {
           </span>
         </button>
       ))}
+      {(chosen || linked.length > 0) && (
+        <div className="oo-field" style={{ gap: 8 }} data-testid="quote-choice">
+          <span style={{ fontSize: 13, color: "var(--ink)" }}>
+            {linked.length ? `This file has ${linked.length === 1 ? "a quote" : `${linked.length} quotes`} — base the pro forma on it?` : "Base it on a quote?"}
+          </span>
+          {[...linked, ...unlinked].map((d) => (
+            <QuoteOption key={d.id} d={d} on={quoteId === d.id} linked={linked.includes(d)} onClick={() => setQuoteSel(d.id)} />
+          ))}
+          <QuoteOption on={!quoteId} onClick={() => setQuoteSel("")} />
+        </div>
+      )}
       <div className="oo-modal-actions">
         <button type="button" className="oo-btn" style={{ marginRight: "auto" }} onClick={() => onPick(null)}>Start blank</button>
         <button type="button" className="oo-btn foot" style={{ padding: "11px 18px" }} onClick={onClose}>Cancel</button>
-        <button type="button" className="oo-btn primary foot" style={{ padding: "11px 20px" }} onClick={go} disabled={!chosen}>
-          Create pro forma
+        <button type="button" className="oo-btn primary foot" style={{ padding: "11px 20px" }} onClick={go} disabled={!chosen && !quote}>
+          {quote ? `Create from ${quote.no}` : "Create pro forma"}
         </button>
       </div>
     </Modal>
+  );
+}
+
+function QuoteOption({ d, on, linked, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        textAlign: "left", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 12, cursor: "pointer", font: "inherit", color: "inherit",
+        border: `1.5px solid ${on ? "var(--accent)" : "var(--line)"}`, background: on ? "var(--accent-soft)" : "var(--panel)",
+      }}
+      data-testid={d ? `quote-opt-${d.no}` : "quote-opt-none"}
+    >
+      {d ? (
+        <>
+          <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            <span style={{ fontWeight: 600 }}>{d.no} <span style={{ fontWeight: 400, color: "var(--mute)", fontSize: 12 }}>· {dmy(d.date)} · {d.status}{linked ? ` · file ${d.file}` : " · not linked to a file"}</span></span>
+            <span style={{ fontSize: 12, color: "var(--ink2)" }}>{[d.pol, d.pod].filter(Boolean).join(" → ") || "—"}{d.commodity ? ` · ${d.commodity}` : ""}</span>
+          </span>
+          <span className="mono" style={{ fontSize: 13, fontWeight: 500 }}>{money("ZAR", calc(d).total)}</span>
+        </>
+      ) : (
+        <span style={{ fontSize: 13 }}>No quote — use the standard rate sheet</span>
+      )}
+    </button>
   );
 }

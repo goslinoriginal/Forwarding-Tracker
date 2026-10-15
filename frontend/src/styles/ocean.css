@@ -466,3 +466,6 @@ textarea.oo-input { line-height: 1.5; resize: none; }
 @media (max-width: 900px) { .oo-two { grid-template-columns: 1fr !important; } .oo-months { gap: 4px; } }
 .oo-card.oo-inv-card { display: grid; grid-template-columns: minmax(200px, 1fr) minmax(0, 1.4fr) auto; gap: 24px; align-items: center; }
 @media (max-width: 900px) { .oo-card.oo-inv-card { grid-template-columns: 1fr; } }
+.oo-note { display: flex; flex-direction: column; gap: 3px; padding: 12px 16px; border-radius: 14px; background: var(--accent-soft); color: var(--accent-ink); font-size: 13px; }
+.oo-note b { font-size: 14px; }
+.oo-note span { color: var(--ink2); }
