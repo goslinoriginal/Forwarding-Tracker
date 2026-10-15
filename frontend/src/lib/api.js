@@ -21,15 +21,19 @@ export const COMPANIES = [
   { key: "Clearfreight", label: "Clearfreight (PTY) LTD" },
 ];
 
+const CONTAINER_RE = /^[A-Z]{4}\d{7}$/;
+
 export const CARRIER_TRACK_URL = {
   MSC: (n) => `https://www.msc.com/en/track-a-shipment?agencyPath=mscu&searchNumber=${encodeURIComponent(n)}`,
   Maersk: (n) => `https://www.maersk.com/tracking/${encodeURIComponent(n)}`,
   ONE: (n) => `https://ecomm.one-line.com/one-ecom/manage-shipment/cargo-tracking?trakNoParam=${encodeURIComponent(n)}`,
   COSCO: (n) => `https://elines.coscoshipping.com/ebusiness/cargoTracking?trackingType=BOOKING&number=${encodeURIComponent(n)}`,
   "Hapag Lloyd": (n) => `https://www.hapag-lloyd.com/en/online-business/track/track-by-container-solution.html?container=${encodeURIComponent(n)}`,
-  PIL: () => "https://www.pilship.com/en/tracking",
-  "CMA CGM": (n) => `https://www.cma-cgm.com/ebusiness/tracking/search?SearchBy=Container&Reference=${encodeURIComponent(n)}`,
-  Vanguard: (n) => `https://www.track-trace.com/container?number=${encodeURIComponent(n)}`,
+  // PIL's own tracking page has no deep link; track-trace hands the number to PIL
+  PIL: (n) => `https://www.track-trace.com/container?number=${encodeURIComponent(n)}`,
+  "CMA CGM": (n) => `https://www.cma-cgm.com/ebusiness/tracking/search?SearchBy=${CONTAINER_RE.test(n) ? "Container" : "Booking"}&Reference=${encodeURIComponent(n)}`,
+  // Vanguard's Quick Track takes the house bill; the number is copied to paste in
+  Vanguard: () => "https://portal.vanguardlogistics.com/apps/quick-track/",
   Other: (n) => `https://www.track-trace.com/container?number=${encodeURIComponent(n)}`,
 };
 
@@ -60,10 +64,27 @@ export function trackTraceUrl(docNumber) {
   return `https://www.track-trace.com/container?number=${encodeURIComponent(docNumber.trim())}`;
 }
 
-/** The carrier's tracking page for this number. A recognised B/L prefix decides the
- *  carrier even if the Carrier field was left on something else. */
+// The number itself identifies who to track with, whatever the Carrier field says.
+const NUMBER_CARRIER = [
+  [/^[A-Z]{3}(DUR|JNB|CPT|PLZ|ELS)\d+V$/, "Vanguard"], // Vanguard house bill (LCL)
+  [/^[A-Z]{3}\d{7}$/, "CMA CGM"], // CMA CGM booking / B/L, e.g. CAD0911040
+  [/^(MEDU|MSCU|MSMU|MSDU)/, "MSC"],
+  [/^(MAEU|MRKU|MSKU)/, "Maersk"],
+  [/^(ONEY|ONEU)/, "ONE"],
+  [/^(COSU|CBHU|CSNU)/, "COSCO"],
+  [/^(HLCU|HLXU)/, "Hapag Lloyd"],
+  [/^(CMDU|CMAU)/, "CMA CGM"],
+  [/^(PCIU|PILU)/, "PIL"],
+];
+
+export function carrierForNumber(docNumber) {
+  const n = (docNumber || "").trim().toUpperCase();
+  const hit = NUMBER_CARRIER.find(([rx]) => rx.test(n));
+  return hit ? hit[1] : null;
+}
+
+/** The carrier's tracking page for this number. */
 export function carrierTrackUrl(carrier, docNumber) {
-  const m = oblMatch(docNumber);
-  const fn = CARRIER_TRACK_URL[m ? m.carrier : carrier] || CARRIER_TRACK_URL.Other;
-  return fn(clipboardTrackingNumber(carrier, docNumber));
+  const fn = CARRIER_TRACK_URL[carrierForNumber(docNumber) || carrier] || CARRIER_TRACK_URL.Other;
+  return fn(clipboardTrackingNumber(carrier, docNumber).toUpperCase());
 }

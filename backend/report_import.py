@@ -50,7 +50,7 @@ DOC_CARRIER = [
     (re.compile(r"^ONEY|^ONEU"), "ONE"),
     (re.compile(r"^COSU|^CBHU|^CSNU"), "COSCO"),
     (re.compile(r"^HLCU|^HLXU"), "Hapag Lloyd"),
-    (re.compile(r"^CMDU|^CMAU"), "CMA CGM"),
+    (re.compile(r"^CMDU|^CMAU|^[A-Z]{3}\d{7}$"), "CMA CGM"),  # incl. bookings like CAD0911040
     (re.compile(r"^PCIU|^PILU"), "PIL"),
     # Consolidator house bills, e.g. TXGDUR6199781V / NBGJNB6723503V
     (re.compile(r"^[A-Z]{3}(DUR|JNB|CPT|PLZ|ELS)\d+V$"), "Vanguard"),
@@ -159,11 +159,11 @@ def _split_vessels(text: str) -> tuple[list[str], str, list[str]]:
     return names, doc, [d for d in docs if d != doc]
 
 
-def _cargo_type(order: str, comments: str, doc: str) -> str:
+def _cargo_type(order: str, comments: str, docs: list[str]) -> str:
     o = order.upper()
     if re.search(r"\d\s*X\s*(20|40)|FCL", o):
         return "FCL"
-    if "LCL" in o or re.search(r"SOB'?S", comments.upper()) or re.match(r"^[A-Z]{3}(DUR|JNB|CPT|PLZ|ELS)\d+V$", doc):
+    if "LCL" in o or re.search(r"SOB'?S", comments.upper()) or any(HOUSE_BILL_RE.match(d) for d in docs):
         return "LCL"
     if "CBM" in o and not re.search(r"(20|40)\s*'", o):
         return "LCL"
@@ -261,6 +261,13 @@ def _parse_row(rec: dict, raw: list, cols: dict, ref: date, cutoff: date) -> dic
         body = comments[m.end():]
 
     names, doc, other_docs = _split_vessels(rec.get("vessel_block", ""))
+    # LCL is tracked with Vanguard on the house bill, so prefer it over the carrier's B/L
+    cargo = _cargo_type(rec.get("order_booking_file", ""), comments, [doc, *other_docs])
+    if cargo == "LCL":
+        house = next((d for d in [doc, *other_docs] if HOUSE_BILL_RE.match(d)), None)
+        if house and house != doc:
+            other_docs = [d for d in [doc, *other_docs] if d != house]
+            doc = house
     legs = [{"name": n, "planned_etd": None, "sob_date": None, "state": "planned"} for n in names] or [{"name": "", "planned_etd": None, "sob_date": None, "state": "planned"}]
 
     def leg_at(n: int):
@@ -333,7 +340,7 @@ def _parse_row(rec: dict, raw: list, cols: dict, ref: date, cutoff: date) -> dic
         "supplier": rec.get("supplier", ""),
         "order_booking_file": "\n".join(line.strip(" ,") for line in order.split("\n")),
         "file_number": rec.get("file_number", ""),
-        "cargo_type": _cargo_type(order, comments, doc),
+        "cargo_type": cargo,
         "carrier": _carrier(doc, legs[0]["name"]),
         "vessel_name": legs[0]["name"],
         "planned_etd": legs[0]["planned_etd"],

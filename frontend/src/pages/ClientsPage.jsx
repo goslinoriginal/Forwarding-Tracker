@@ -6,6 +6,20 @@ import { COMPANY_HUE, Pill, Seg, useToast } from "@/lib/ui";
 import ClientModal from "@/components/ClientModal";
 import ImportModal from "@/components/ImportModal";
 
+const SORTS = [
+  { value: "name_asc", label: "Name (A–Z)" },
+  { value: "name_desc", label: "Name (Z–A)" },
+  { value: "most", label: "Most active shipments" },
+  { value: "fewest", label: "Fewest active shipments" },
+  { value: "on_water", label: "On the water first" },
+  { value: "delayed", label: "Most delayed first" },
+];
+const ACTIVITY = [
+  { value: "any", label: "Any" },
+  { value: "active", label: "With active shipments" },
+  { value: "none", label: "No active shipments" },
+];
+
 const COLS = "minmax(200px,1.6fr) 130px 70px 80px 120px minmax(160px,1.4fr) 60px 36px 36px 20px";
 
 export default function ClientsPage() {
@@ -18,6 +32,9 @@ export default function ClientsPage() {
   const [filter, setFilter] = useState("All");
   const [hasDelays, setHasDelays] = useState(false);
   const [unsent, setUnsent] = useState(false);
+  const [onWater, setOnWater] = useState(false);
+  const [activity, setActivity] = useState("any");
+  const [sort, setSort] = useState("name_asc");
   const [search, setSearch] = useState("");
   const [newOpen, setNewOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -29,11 +46,25 @@ export default function ClientsPage() {
   const q = search.trim().toLowerCase();
   const sorted = pinSort(clients);
   const pinList = sorted.filter((c) => c.pinned).map((c) => c.id);
-  const rows = sorted
+  const onWaterFor = (id) => active.filter((s) => s.client_id === id && s.status === "Shipped").length;
+  const byName = (a, b) => a.name.localeCompare(b.name);
+  const cmp = {
+    name_asc: byName,
+    name_desc: (a, b) => byName(b, a),
+    most: (a, b) => countFor(b.id) - countFor(a.id) || byName(a, b),
+    fewest: (a, b) => countFor(a.id) - countFor(b.id) || byName(a, b),
+    on_water: (a, b) => onWaterFor(b.id) - onWaterFor(a.id) || byName(a, b),
+    delayed: (a, b) => delayedFor(b.id) - delayedFor(a.id) || byName(a, b),
+  }[sort];
+  const filtered = sorted
     .filter((c) => matches(c, filter))
+    .filter((c) => activity === "any" || (activity === "active" ? countFor(c.id) > 0 : countFor(c.id) === 0))
     .filter((c) => !hasDelays || delayedFor(c.id) > 0)
+    .filter((c) => !onWater || onWaterFor(c.id) > 0)
     .filter((c) => !unsent || !sent[c.id])
     .filter((c) => !q || `${c.name} ${clientEmail(c)}`.toLowerCase().includes(q));
+  // Pinned clients stay on top in their own order; everyone else follows the chosen sort
+  const rows = [...filtered.filter((c) => c.pinned), ...filtered.filter((c) => !c.pinned).sort(cmp)];
 
   const patch = async (c, body, msg) => {
     try {
@@ -78,9 +109,20 @@ export default function ClientsPage() {
         />
         <div style={{ display: "flex", gap: 6 }}>
           <button type="button" className={`oo-chipbtn ${hasDelays ? "on" : ""}`} onClick={() => setHasDelays(!hasDelays)}>Has delays</button>
+          <button type="button" className={`oo-chipbtn ${onWater ? "on" : ""}`} onClick={() => setOnWater(!onWater)}>On the water</button>
           <button type="button" className={`oo-chipbtn ${unsent ? "on" : ""}`} onClick={() => setUnsent(!unsent)}>Report not sent</button>
         </div>
         <input className="oo-search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search clients or email…" />
+      </div>
+      <div className="oo-toolbar" style={{ marginTop: -14 }}>
+        <span className="oo-sub">Shipments</span>
+        <Seg value={activity} onChange={setActivity} options={ACTIVITY.map((a) => ({ ...a, count: clients.filter((c) => a.value === "any" || (a.value === "active" ? countFor(c.id) > 0 : countFor(c.id) === 0)).length }))} />
+        <label style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+          <span className="oo-sub">Sort</span>
+          <select className="oo-input" style={{ width: 230, borderRadius: 999, padding: "9px 14px" }} value={sort} onChange={(e) => setSort(e.target.value)}>
+            {SORTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </label>
       </div>
 
       <div className="oo-card scroll">
