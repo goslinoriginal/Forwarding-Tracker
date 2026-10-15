@@ -56,7 +56,7 @@ export function Toggle({ on, onChange, size, title }) {
   );
 }
 
-export function Modal({ onClose, children }) {
+export function Modal({ onClose, children, wide }) {
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
@@ -66,7 +66,7 @@ export function Modal({ onClose, children }) {
   return createPortal(
     <>
       <div className="oo-scrim" onClick={onClose} />
-      <div className="oo-modal-wrap">
+      <div className={`oo-modal-wrap ${wide ? "wide" : ""}`}>
         <div className="oo-modal">{children}</div>
       </div>
     </>,

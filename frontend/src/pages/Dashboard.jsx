@@ -32,6 +32,8 @@ export default function Dashboard() {
   const delayedFor = (id) => active.filter((s) => s.client_id === id && displayStatus(s) === "Delayed").length;
   const delayed = active.filter((s) => displayStatus(s) === "Delayed").length;
   const sorted = pinSort(clients);
+  // Clients with nothing left to monitor (all shipments archived) stay off the daily list
+  const monitored = sorted.filter((c) => countFor(c.id) > 0 || c.flagged);
   const openClient = (id) => navigate(`/clients/${id}`);
 
   const tick = async (r) => {
@@ -62,7 +64,7 @@ export default function Dashboard() {
   active.forEach((s) => { const k = s.carrier || "Other"; counts[k] = (counts[k] || 0) + 1; });
   const max = Math.max(1, ...Object.values(counts));
   const carriers = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
-  const sentCount = clients.filter((c) => sent[c.id]).length;
+  const sentCount = monitored.filter((c) => sent[c.id]).length;
 
   return (
     <div className="oo-page" data-screen-label="Dashboard">
@@ -71,14 +73,14 @@ export default function Dashboard() {
           <span className="oo-sub">{longToday()}</span>
           <h1 className="oo-h1">{greeting()}</h1>
           <p className="oo-lead">
-            {active.length} active shipment{active.length === 1 ? "" : "s"} across {clients.length} client{clients.length === 1 ? "" : "s"} · {reminders.length} cargo report{reminders.length === 1 ? "" : "s"} due.
+            {active.length} active shipment{active.length === 1 ? "" : "s"} across {monitored.length} client{monitored.length === 1 ? "" : "s"} · {reminders.length} cargo report{reminders.length === 1 ? "" : "s"} due.
           </p>
         </div>
         <button type="button" className="oo-btn" style={{ padding: "11px 18px" }} onClick={() => navigate("/clients")}>Manage clients →</button>
       </div>
 
       <div className="oo-kpis">
-        <div className="oo-kpi" style={{ background: "var(--accent-soft)", color: "var(--accent-ink)", animationDelay: ".04s" }}><span>Active clients</span><span className="n">{clients.length}</span></div>
+        <div className="oo-kpi" style={{ background: "var(--accent-soft)", color: "var(--accent-ink)", animationDelay: ".04s" }}><span>Active clients</span><span className="n">{monitored.length}</span></div>
         <div className="oo-kpi" style={{ background: "var(--sub)", border: "1px solid var(--line2)", animationDelay: ".08s" }}><span style={{ color: "var(--ink2)" }}>Active shipments</span><span className="n">{active.length}</span></div>
         <div className="oo-kpi" style={{ background: "var(--red-bg)", color: "var(--red-fg)", animationDelay: ".12s" }}><span>Delayed</span><span className="n">{delayed}</span></div>
         <div className="oo-kpi" style={{ background: "var(--amb-bg)", color: "var(--amb-fg)", animationDelay: ".16s" }}><span>Cargo reports due</span><span className="n">{reminders.length}</span></div>
@@ -143,10 +145,10 @@ export default function Dashboard() {
         <div className="oo-card pad fade-up" style={{ animationDelay: ".24s" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
             <h2 className="oo-h2">Today's reports</h2>
-            <span className="oo-sub">{sentCount} of {clients.length} sent</span>
+            <span className="oo-sub">{sentCount} of {monitored.length} sent</span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            {sorted.map((c) => {
+            {monitored.map((c) => {
               const t = sent[c.id];
               return (
                 <div key={c.id} className="oo-list-row">
@@ -158,7 +160,7 @@ export default function Dashboard() {
                 </div>
               );
             })}
-            {!clients.length && <span className="oo-sub" style={{ padding: "12px 14px" }}>No clients yet.</span>}
+            {!monitored.length && <span className="oo-sub" style={{ padding: "12px 14px" }}>No clients with active shipments.</span>}
           </div>
         </div>
         <div className="oo-card pad fade-up" style={{ animationDelay: ".28s" }}>

@@ -314,6 +314,7 @@ textarea.oo-input { line-height: 1.5; resize: none; }
 /* ---------- Modal ---------- */
 .oo-scrim { position: fixed; inset: 0; background: var(--scrim); backdrop-filter: blur(3px); z-index: 40; animation: fadeIn 0.25s ease both; }
 .oo-modal-wrap { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 41; width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 32px); display: flex; }
+.oo-modal-wrap.wide { width: min(980px, calc(100vw - 32px)); }
 .oo-modal {
   background: var(--panel); border-radius: 28px; padding: 30px; box-shadow: var(--sh-pop); display: flex; flex-direction: column;
   gap: 20px; animation: modalIn 0.3s var(--ease) both; overflow: auto; width: 100%;

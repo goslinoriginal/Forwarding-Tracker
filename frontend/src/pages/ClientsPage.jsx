@@ -4,6 +4,7 @@ import { api, OPTIONAL_COLUMNS } from "@/lib/api";
 import { clientEmail, displayStatus, pinSort, useClients, useRefresh, useReportLog, useShipments } from "@/lib/data";
 import { COMPANY_HUE, Pill, Seg, useToast } from "@/lib/ui";
 import ClientModal from "@/components/ClientModal";
+import ImportModal from "@/components/ImportModal";
 
 const COLS = "minmax(200px,1.6fr) 130px 70px 80px 120px minmax(160px,1.4fr) 60px 36px 36px 20px";
 
@@ -19,6 +20,7 @@ export default function ClientsPage() {
   const [unsent, setUnsent] = useState(false);
   const [search, setSearch] = useState("");
   const [newOpen, setNewOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   const active = ships.filter((s) => !s.anf_received);
   const countFor = (id) => active.filter((s) => s.client_id === id).length;
@@ -62,7 +64,10 @@ export default function ClientsPage() {
           <h1 className="oo-h1">Clients</h1>
           <p className="oo-lead">Each client gets its own report profile and columns.</p>
         </div>
-        <button type="button" className="oo-btn primary lg" onClick={() => setNewOpen(true)} data-testid="add-client-button">+ New client</button>
+        <div className="oo-actions">
+          <button type="button" className="oo-btn lg" onClick={() => setImportOpen(true)} data-testid="import-reports-button">Import status reports</button>
+          <button type="button" className="oo-btn primary lg" onClick={() => setNewOpen(true)} data-testid="add-client-button">+ New client</button>
+        </div>
       </div>
 
       <div className="oo-toolbar">
@@ -144,6 +149,7 @@ export default function ClientsPage() {
       </div>
 
       {newOpen && <ClientModal onClose={() => setNewOpen(false)} onSaved={() => refresh("clients")} />}
+      {importOpen && <ImportModal onClose={() => setImportOpen(false)} onDone={() => refresh()} />}
     </div>
   );
 }

@@ -499,9 +499,12 @@ def _regenerate_comment(ship: dict) -> str:
             else:
                 parts.append(f"{label}Planned ETD {etd_txt}.")
 
-    # Awaiting clause
+    # Awaiting clause — skipped when ops wrote their own "Awaiting ..." note
     is_lcl = (ship.get("cargo_type") or "FCL").upper() == "LCL"
-    if all_sailed:
+    own_awaiting = bool(re.match(r"\s*awaiting\b", ship.get("comment_note") or "", re.I))
+    if own_awaiting:
+        pass
+    elif all_sailed:
         parts.append("Awaiting SOB's." if is_lcl else "Awaiting ANF.")
     elif legs[0]["sob_date"] and multi:
         parts.append("Awaiting confirmation of departure of next vessel.")
@@ -2103,6 +2106,114 @@ async def delete_document(doc_id: str):
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Document not found")
     return {"ok": True}
+
+
+# ---------- Import old Excel status reports ----------
+import base64  # noqa: E402
+
+from report_import import parse_report  # noqa: E402
+
+
+class ImportFile(BaseModel):
+    name: str
+    data: str  # base64-encoded .xlsx
+
+
+class ImportPreviewPayload(BaseModel):
+    files: List[ImportFile]
+    cutoff: str  # YYYY-MM-DD — shipments with no update since then are archived
+
+
+class ImportCommitPayload(BaseModel):
+    reports: List[dict]
+
+
+def _ship_key(s: dict) -> tuple:
+    return ((s.get("file_number") or "").strip(), (s.get("supplier") or "").strip().lower())
+
+
+async def _client_by_name(name: str) -> Optional[dict]:
+    return await db.clients.find_one({"name": {"$regex": f"^{re.escape(name.strip())}$", "$options": "i"}}, _proj())
+
+
+@api_router.post("/import/preview")
+async def import_preview(payload: ImportPreviewPayload):
+    try:
+        cutoff = date.fromisoformat(payload.cutoff)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="cutoff must be YYYY-MM-DD")
+    reports = []
+    for f in payload.files:
+        try:
+            parsed = parse_report(base64.b64decode(f.data), f.name, cutoff)
+        except Exception as exc:  # one bad file shouldn't stop the rest
+            reports.append({"file": f.name, "error": f"Couldn't read this file: {exc}"})
+            continue
+        existing = await _client_by_name(parsed["client"]["name"])
+        parsed["existing_client_id"] = existing["id"] if existing else None
+        known = set()
+        if existing:
+            async for s in db.shipments.find({"client_id": existing["id"]}, {"_id": 0, "file_number": 1, "supplier": 1}):
+                known.add(_ship_key(s))
+        for s in parsed["shipments"]:
+            s["duplicate"] = _ship_key(s) in known
+        reports.append(parsed)
+    return {"reports": reports}
+
+
+SHIPMENT_IMPORT_FIELDS = set(ShipmentCreate.model_fields) | {"first_vessel_state", "second_vessel_state"}
+
+
+@api_router.post("/import/commit")
+async def import_commit(payload: ImportCommitPayload):
+    created_clients = updated_clients = added = archived = skipped = 0
+    for rep in payload.reports:
+        info = rep.get("client") or {}
+        name = (info.get("name") or "").strip()
+        if not name or rep.get("error"):
+            continue
+        company = info.get("company") if info.get("company") in COMPANIES else "Patuma"
+        columns = {k: bool(v) for k, v in (info.get("optional_columns") or {}).items() if k in DEFAULT_OPTIONAL_COLUMNS}
+        client = await _client_by_name(name)
+        if client:
+            merged = {**(client.get("optional_columns") or {}), **{k: True for k, v in columns.items() if v}}
+            await db.clients.update_one({"id": client["id"]}, {"$set": {"optional_columns": merged}})
+            updated_clients += 1
+        else:
+            client = Client(name=name, company=company, optional_columns={**DEFAULT_OPTIONAL_COLUMNS, **columns}).model_dump()
+            await db.clients.insert_one(dict(client))
+            created_clients += 1
+
+        known = set()
+        async for s in db.shipments.find({"client_id": client["id"]}, {"_id": 0, "file_number": 1, "supplier": 1}):
+            known.add(_ship_key(s))
+        base = datetime.now(timezone.utc)
+        for i, row in enumerate(rep.get("shipments") or []):
+            if _ship_key(row) in known:
+                skipped += 1
+                continue
+            data = {k: v for k, v in row.items() if k in SHIPMENT_IMPORT_FIELDS}
+            data["client_id"] = client["id"]
+            data["extra_vessels"] = data.get("extra_vessels") or []
+            ship = Shipment(**data).model_dump()
+            ship["first_vessel_state"] = row.get("first_vessel_state") or "planned"
+            ship["second_vessel_state"] = row.get("second_vessel_state") or "planned"
+            ship["created_at"] = (base + timedelta(milliseconds=i)).isoformat()  # keeps the report's row order
+            if row.get("last_update"):
+                ship["updated_at"] = f"{row['last_update']}T12:00:00+00:00"
+            if row.get("archived"):
+                ship["anf_received"] = True
+                ship["anf_received_at"] = _now_iso()
+                archived += 1
+            ship["comments"] = _regenerate_comment(ship)
+            ship["status"] = _derive_status(ship)
+            await db.shipments.insert_one(ship)
+            known.add(_ship_key(ship))
+            added += 1
+    return {
+        "created_clients": created_clients, "updated_clients": updated_clients,
+        "shipments_added": added, "archived": archived, "skipped_duplicates": skipped,
+    }
 
 
 @api_router.get("/")
