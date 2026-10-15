@@ -127,6 +127,46 @@ export function calc(d) {
 export const ecDesc = (l) =>
   (l.ec || l.desc || "").toUpperCase() + (l.basis !== "pct" && l.cur !== "ZAR" && l.fc ? ` (${l.cur === "USD" ? "US$" : "EU"}${l.fc.toFixed(2)})` : "");
 
+const UNIT_NAMES = [
+  [/^(ctns?|cartons?)$/i, "Cartons"], [/^(pkgs?|packages?)$/i, "Packages"], [/^(plts?|pallets?)$/i, "Pallets"],
+  [/^(pcs|pieces?)$/i, "Pieces"], [/^cases?$/i, "Cases"], [/^drums?$/i, "Drums"], [/^rolls?$/i, "Rolls"],
+  [/^sets?$/i, "Sets"], [/^crates?$/i, "Crates"], [/^bags?$/i, "Bags"], [/^boxe?s?$/i, "Boxes"],
+];
+const UNIT_RE = /(\d+)\s*(ctns?|cartons?|pkgs?|packages?|plts?|pallets?|pcs|pieces?|cases?|drums?|rolls?|sets?|crates?|bags?|boxe?s?)\b/i;
+
+/** Reads the status report's order text, e.g. "SEHA12225, 11 PKGS, 4978 KGS, 12 CBM" or
+ *  "2x20' FCL's, 160 Drums, 42060 Kgs, 60 Cbm ORDER NO 153615". Decimal commas are kept as typed. */
+export function parseOrder(text) {
+  const t = String(text || "");
+  const out = {};
+  const cn = [...t.matchAll(/(\d+)\s*x\s*(?:20|40|45)\s*'/gi)].reduce((a, m) => a + Number(m[1]), 0);
+  if (cn) out.cntrs = String(cn);
+  const kg = t.match(/(\d[\d.,]*)\s*kgs?\b/i);
+  if (kg) out.kgs = kg[1];
+  const cbm = t.match(/(\d[\d.,]*)\s*cbm\b/i);
+  if (cbm) out.cbm = cbm[1];
+  const u = t.replace(/\d+\s*x\s*(?:20|40|45)\s*'/gi, "").match(UNIT_RE);
+  if (u) {
+    out.units = u[1];
+    out.unitType = (UNIT_NAMES.find(([re]) => re.test(u[2])) || [null, u[2]])[1];
+  }
+  const model = t.match(/model:\s*(.+)/i);
+  if (model) out.commodity = model[1].trim();
+  const order = t.match(/(?:order\s*no\.?|o\/no\.?(?:'?s)?:?|inv\.?\s*no\.?)\s*:?\s*([^,\n]+)/i);
+  if (order) out.ref = order[1].trim();
+  else {
+    // Leading references such as "ZN26170, ZN26184, ZN26195, 2x20' FCLs"
+    const refs = [];
+    for (const raw of t.split(/[,\n]/)) {
+      const p = raw.trim().replace(/\s+\d+\s*x\s*(?:20|40|45)\s*'.*$/i, "");
+      if (!/^[A-Z]/i.test(p) || !/\d/.test(p) || /kgs?\b|cbm\b|\bfcl|\blcl|model:/i.test(p) || UNIT_RE.test(p)) break;
+      refs.push(p);
+    }
+    if (refs.length) out.ref = refs.join(", ");
+  }
+  return out;
+}
+
 export function makeDoc(tpl, type, o) {
   return {
     id: null, type, tpl, no: "", clientId: "", entity: "Clearfreight",

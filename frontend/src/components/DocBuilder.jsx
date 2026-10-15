@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api } from "@/lib/api";
-import { clientEmail, useClients, useRefresh, useShipments } from "@/lib/data";
+import { clientEmail, shipmentLegs, useClients, useRefresh, useShipments } from "@/lib/data";
 import {
-  DEF_OF, ENTITIES, GROUPS, INCO, Ln, PFI_TERMS, QUOTE_TERMS, SYM, TPL, calc, ecDesc, fmt, money, num,
+  DEF_OF, ENTITIES, GROUPS, INCO, Ln, PFI_TERMS, QUOTE_TERMS, SYM, TPL, calc, ecDesc, fmt, money, num, parseOrder,
 } from "@/lib/billingCalc";
 import { Seg, copyText, dmy, isoPlusDays, useToast } from "@/lib/ui";
 
@@ -20,6 +20,35 @@ function F({ label, children }) {
 export async function nextDocNumber(type) {
   const { data } = await api.get("/documents/next-number", { params: { type } });
   return data.no;
+}
+
+const JHB_RE = /jhb|johannesburg|city deep|kaserne|gauteng/i;
+
+/** Everything a quote / pro forma can take from the status report for one file. */
+export function fromShipment(s, client) {
+  const o = parseOrder(s.order_booking_file);
+  const cargoTpl = s.cargo_type === "LCL" ? "lcl" : "fcl";
+  const dest = s.final_destination || s.pod || "";
+  return {
+    clientId: s.client_id,
+    entity: client?.company || "Clearfreight",
+    att: client?.email_greeting || "",
+    file: s.file_number || "",
+    ref: o.ref || "",
+    commodity: o.commodity || "",
+    units: o.units || "",
+    unitType: o.unitType || "Crates",
+    cbm: o.cbm || "",
+    kgs: o.kgs || "",
+    cntrs: o.cntrs || s.fcl_count || "1",
+    pol: s.pol || "",
+    pod: dest || "Durban",
+    vessel: shipmentLegs(s).map((l) => l.name).filter(Boolean).join(" / "),
+    sob: s.sob_date || "",
+    eta: s.eta || s.planned_eta || "",
+    jhb: JHB_RE.test(dest),
+    cargoTpl,
+  };
 }
 
 export default function DocBuilder({ initial, onClose }) {
@@ -126,9 +155,13 @@ export default function DocBuilder({ initial, onClose }) {
 
   const setFile = (f) => {
     const s = shipsFor.find((x) => x.file_number === f);
-    setD(s
-      ? { file: f, pol: s.pol || dc.pol, pod: s.final_destination || s.pod || dc.pod, ref: (s.order_booking_file || "").split(/ · |,|\n/)[0].trim() || dc.ref, vessel: s.vessel_name || dc.vessel }
-      : { file: f });
+    if (!s) { setD({ file: f }); return; }
+    const { cargoTpl, ...fill } = fromShipment(s, client);
+    // Keep anything already typed where the status report has nothing
+    const patch = Object.fromEntries(Object.entries(fill).filter(([k, v]) => v !== "" || k === "file"));
+    if (!dc.id && cargoTpl !== dc.tpl && dc.tpl !== "imp") Object.assign(patch, { tpl: cargoTpl, lines: TPL[cargoTpl].lines(), markup: String(TPL[cargoTpl].markup) });
+    setD(patch);
+    toast(`Filled from file ${f}`);
   };
 
   const startSplit = (e) => {
@@ -181,7 +214,7 @@ export default function DocBuilder({ initial, onClose }) {
     return { g, label: `Total ${label.toLowerCase()}`, rows, sub: fmt(rows.reduce((a, l) => a + l.zar, 0)), vat: fmt(rows.reduce((a, l) => a + l.vatAmt, 0)) };
   }).filter(Boolean);
   const party = [[isQ ? "To" : "Client", client.name || "—"], ["Attention", dc.att], ["Date", dmy(dc.date)], [isQ ? "Valid until" : "Payment due", dmy(dc.until)], ["Ref no", dc.ref], ["File", dc.file], ["Prepared by", dc.prep], ["Email", clientEmail(client)]].filter((p) => p[1]);
-  const shipInfo = [["Commodity", dc.commodity], ["Units", [dc.units, dc.unitType].filter(Boolean).join(" ")], ["CBM", dc.cbm], ["KGS", dc.kgs], ["ETD / POL", dc.pol], ["ETA / POD", dc.pod], ["Via", dc.via], ["Transit time", dc.transit], ["Vessel", dc.vessel], ["Frequency", dc.freq], ["Terms", dc.inco], ["R.O.E.", `USD ${roeTxt(c.roe.USD)}${usesEur ? ` · EUR ${roeTxt(c.roe.EUR)}` : ""}`]].filter((p) => p[1]);
+  const shipInfo = [["Commodity", dc.commodity], ["Units", [dc.units, dc.unitType].filter(Boolean).join(" ")], ["CBM", dc.cbm], ["KGS", dc.kgs], ["ETD / POL", dc.pol], ["ETA / POD", dc.pod], ["Via", dc.via], ["Transit time", dc.transit], ["Vessel", dc.vessel], ["SOB date", dmy(dc.sob)], ["ETA", dmy(dc.eta)], ["Frequency", dc.freq], ["Terms", dc.inco], ["R.O.E.", `USD ${roeTxt(c.roe.USD)}${usesEur ? ` · EUR ${roeTxt(c.roe.EUR)}` : ""}`]].filter((p) => p[1]);
   const entered = dc.entered || {};
   const markEntered = (id, v) => setD((d) => ({ entered: { ...(d.entered || {}), [id]: v } }));
   const doneN = live.filter((l) => entered[l.id]).length;
@@ -245,7 +278,7 @@ export default function DocBuilder({ initial, onClose }) {
               <F label="Linked file #">
                 <select className="oo-input b" value={dc.file} onChange={(e) => setFile(e.target.value)}>
                   <option value="">None</option>
-                  {shipsFor.filter((s) => s.file_number).map((s) => <option key={s.id} value={s.file_number}>{s.file_number} · {s.supplier}</option>)}
+                  {shipsFor.filter((s) => s.file_number).map((s) => <option key={s.id} value={s.file_number}>{[s.file_number, s.supplier || s.end_client].filter(Boolean).join(" · ")}</option>)}
                 </select>
               </F>
               <F label="Commodity"><input className="oo-input b" value={dc.commodity} onChange={on("commodity")} placeholder="e.g. Pumps (non haz)" /></F>
@@ -262,6 +295,8 @@ export default function DocBuilder({ initial, onClose }) {
               <F label="Via"><input className="oo-input b" value={dc.via} onChange={on("via")} placeholder="Transhipment port" /></F>
               <F label="Transit time"><input className="oo-input b" value={dc.transit} onChange={on("transit")} placeholder="e.g. 27 days" /></F>
               <F label="Vessel"><input className="oo-input b" value={dc.vessel} onChange={on("vessel")} /></F>
+              <F label="SOB date"><input type="date" className="oo-input b" value={dc.sob || ""} onChange={on("sob")} /></F>
+              <F label="ETA"><input type="date" className="oo-input b" value={dc.eta || ""} onChange={on("eta")} /></F>
               <F label="Frequency"><input className="oo-input b" value={dc.freq} onChange={on("freq")} placeholder="Weekly" /></F>
             </div>
             <div className="oo-field">
@@ -273,7 +308,7 @@ export default function DocBuilder({ initial, onClose }) {
           <section className="oo-sec">
             <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
               <h3>Rates of exchange</h3>
-              <span style={{ fontSize: 12, color: "var(--mute)" }}>The higher of SOB-date and today’s ROE is used, plus the markup.</span>
+              <span style={{ fontSize: 12, color: "var(--mute)" }}>The higher of SOB-date and today’s ROE is used, plus the markup.{dc.sob ? ` SOB date: ${dmy(dc.sob)}.` : ""}</span>
             </div>
             <div className="oo-autogrid">
               <F label="USD · SOB date ROE"><input className="oo-input b" value={dc.usdSob} onChange={on("usdSob")} placeholder="0.0000" inputMode="decimal" /></F>
