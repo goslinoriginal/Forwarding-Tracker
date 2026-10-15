@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { api, CARRIERS, carrierTrackUrl, clipboardTrackingNumber } from "@/lib/api";
+import { openTracking } from "@/lib/trackWindow";
 import {
   displayStatus, downloadReport, openReportEmail, receivedLabel, shipmentLegs, statusLabel,
   useClients, useRefresh, useReportLog, useSettings, useShipments, useVessels,
@@ -224,7 +225,7 @@ function ShipmentEditor({ clientId, shipId, onClose }) {
     if (!n) { toast("No tracking number on this file"); return; }
     const copy = clipboardTrackingNumber(fm.carrier, n);
     copyText(copy);
-    window.open(carrierTrackUrl(fm.carrier, n), "_blank", "noopener,noreferrer");
+    openTracking(carrierTrackUrl(fm.carrier, n));
     toast(`${copy} copied`);
   };
 
