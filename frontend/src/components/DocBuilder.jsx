@@ -6,7 +6,7 @@ import {
   DEF_OF, ENTITIES, GROUPS, INCO, Ln, PFI_TERMS, QUOTE_TERMS, SYM, TPL, calc, dotDecimal, ecDesc, equipmentText, fmt, money, num, parseOrder,
 } from "@/lib/billingCalc";
 import { offReason } from "@/lib/holidays";
-import { Seg, copyText, dmy, isoPlusDays, useToast } from "@/lib/ui";
+import { Seg, copyText, dmy, docDate, isoPlusDays, useToast } from "@/lib/ui";
 
 /* Full-screen quote / pro forma builder: capture on the left, a live printable
    preview (or the EasyClear line list) on the right, split by a draggable handle. */
@@ -284,8 +284,8 @@ export default function DocBuilder({ initial, onClose }) {
     return { g, label: `Total ${label.toLowerCase()}`, rows, sub: fmt(rows.reduce((a, l) => a + l.zar, 0)), vat: fmt(rows.reduce((a, l) => a + l.vatAmt, 0)) };
   }).filter(Boolean);
   // The pro forma is a freight statement: no email, payment due or terms on it
-  const party = [[isQ ? "To" : "Client", client.name || "—"], ["Attention", dc.att], ["Date", dmy(dc.date)], isQ && ["Valid until", dmy(dc.until)], ["Ref no", dc.ref], ["File", dc.file], ["Prepared by", dc.prep], isQ && ["Email", clientEmailLabel(client)]].filter((p) => p && p[1]);
-  const shipInfo = [["Containers", dc.equipment], ["Total weight", dc.kgs && `${dc.kgs} KGS`], ["Total volume", dc.cbm && `${dc.cbm} CBM`], ["B/L no.", dc.bl], ["Commodity", dc.commodity], ["ETD / POL", dc.pol], ["ETA / POD", dc.pod], ["Via", dc.via], ["Transit time", dc.transit], ["Vessel", dc.vessel], ["SOB date", dmy(dc.sob)], ["ETA", dmy(dc.eta)], ["Frequency", dc.freq], ["Terms", dc.inco]].filter((p) => p[1]);
+  const party = [[isQ ? "To" : "Client", client.name || "—"], ["Attention", dc.att], ["Date", docDate(dc.date)], isQ && ["Valid until", docDate(dc.until)], ["Ref no", dc.ref], ["File", dc.file], ["Prepared by", dc.prep], isQ && ["Email", clientEmailLabel(client)]].filter((p) => p && p[1]);
+  const shipInfo = [["Containers", dc.equipment], ["Total weight", dc.kgs && `${dc.kgs} KGS`], ["Total volume", dc.cbm && `${dc.cbm} CBM`], ["B/L no.", dc.bl], ["Commodity", dc.commodity], ["ETD / POL", dc.pol], ["ETA / POD", dc.pod], ["Via", dc.via], ["Transit time", dc.transit], ["Vessel", dc.vessel], ["SOB date", docDate(dc.sob)], ["ETA", docDate(dc.eta)], ["Frequency", dc.freq], ["Terms", dc.inco]].filter((p) => p[1]);
   // ROE comparison: SOB date vs today, the higher one, then the markup (foreign amounts only)
   const markupPct = num(dc.markup);
   const roeCols = [["USD", dc.usdSob, dc.usdToday, c.roe.USD], ["EUR", dc.eurSob, dc.eurToday, c.roe.EUR]]
@@ -584,9 +584,9 @@ export default function DocBuilder({ initial, onClose }) {
                     <span className="k" style={{ gridColumn: "1 / -1" }}>Rate of exchange</span>
                     <span />
                     {roeCols.map((r) => <span key={r.cur} className="r k">{r.cur}</span>)}
-                    <span>SOB date{dc.sob ? ` (${dmy(roeDay(dc.sob))})` : ""}</span>
+                    <span>SOB date{dc.sob ? ` (${docDate(roeDay(dc.sob))})` : ""}</span>
                     {roeCols.map((r) => <span key={r.cur} className={`mono r ${r.sob && r.sob >= r.today ? "hi" : ""}`}>{r.sob ? r.sob.toFixed(4) : "—"}</span>)}
-                    <span>Today ({dmy(dc.date)})</span>
+                    <span>Today ({docDate(dc.date)})</span>
                     {roeCols.map((r) => <span key={r.cur} className={`mono r ${r.today && r.today > r.sob ? "hi" : ""}`}>{r.today ? r.today.toFixed(4) : "—"}</span>)}
                     <span>Higher of the two + {markupPct}%</span>
                     {roeCols.map((r) => <span key={r.cur} className="mono r" style={{ fontWeight: 700 }}>{r.used ? r.used.toFixed(4) : "—"}</span>)}

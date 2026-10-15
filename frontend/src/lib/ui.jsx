@@ -136,6 +136,9 @@ const ISO = /^(\d{4})-(\d{2})-(\d{2})$/;
 /** YYYY-MM-DD -> DD.MM. (anything else is shown as-is) */
 export const dm = (iso) => { const m = ISO.exec(iso || ""); return m ? `${m[3]}.${m[2]}.` : iso || ""; };
 /** YYYY-MM-DD -> DD.MM.YYYY */
+const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** "2026-10-15" → "15 Oct 2026" (dates printed on quotes and pro formas). */
+export const docDate = (iso) => { const m = ISO.exec(iso || ""); return m ? `${Number(m[3])} ${MON[Number(m[2]) - 1]} ${m[1]}` : iso || ""; };
 export const dmy = (iso) => { const m = ISO.exec(iso || ""); return m ? `${m[3]}.${m[2]}.${m[1]}` : iso || ""; };
 /** Accepts DD.MM., DD.MM.YYYY, DD/MM/YYYY or ISO; returns ISO, or the text unchanged (e.g. "RCG"). */
 export function parseDayInput(text) {
