@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api } from "@/lib/api";
-import { Modal, Seg, useToast } from "@/lib/ui";
+import { Modal, Seg, Toggle, useToast } from "@/lib/ui";
 
 const ENTITIES = [{ value: "Patuma", label: "Patuma" }, { value: "Clearfreight", label: "Clearfreight" }];
 
@@ -12,7 +12,11 @@ export default function ClientModal({ client, onClose, onSaved, onDeleted }) {
     name: client?.name || "", contact_email: client?.contact_email || "", company: client?.company || "Patuma",
     email_to: client?.email_to || "", email_cc: client?.email_cc || "", email_greeting: client?.email_greeting || "",
     default_pod: client?.default_pod || "", notes: client?.notes || "",
+    internal: !!client?.internal,
+    // One "Client = Handover party" per line
+    parties: Object.entries(client?.handover_parties || {}).map(([k, v]) => `${k} = ${v}`).join("\n"),
   }));
+  const isHandovers = client?.report_layout === "handovers";
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
 
@@ -21,7 +25,13 @@ export default function ClientModal({ client, onClose, onSaved, onDeleted }) {
     if (!name) { toast("Client name is required", { error: true }); return; }
     setBusy(true);
     try {
-      const payload = { ...f, name, contact_email: f.contact_email.trim() };
+      const { parties, ...rest } = f;
+      const payload = { ...rest, name, contact_email: f.contact_email.trim() };
+      if (isHandovers) {
+        payload.handover_parties = Object.fromEntries(
+          parties.split("\n").map((line) => line.split("=")).filter((p) => p[0].trim()).map(([k, ...v]) => [k.trim(), v.join("=").trim()]),
+        );
+      }
       const { data } = editing
         ? await api.patch(`/clients/${client.id}`, payload)
         : await api.post("/clients", { name, contact_email: payload.contact_email, company: f.company });
@@ -75,6 +85,19 @@ export default function ClientModal({ client, onClose, onSaved, onDeleted }) {
             <label className="oo-field"><span>Default port of discharge</span><input className="oo-input" value={f.default_pod} onChange={set("default_pod")} placeholder="Durban" /></label>
           </div>
           <label className="oo-field"><span>Notes</span><textarea className="oo-input" rows={3} value={f.notes} onChange={set("notes")} /></label>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+            <div className="oo-card-title">
+              <span style={{ fontSize: 14, fontWeight: 500 }}>Internal group report</span>
+              <span className="oo-sub">Not emailed to anyone and left off the daily "report not sent" list.</span>
+            </div>
+            <Toggle on={f.internal} onChange={(v) => setF({ ...f, internal: v })} />
+          </div>
+          {isHandovers && (
+            <label className="oo-field">
+              <span>Handover parties — one per line: Client = Clearing agent</span>
+              <textarea className="oo-input mono" rows={6} style={{ fontSize: 12, resize: "vertical" }} value={f.parties} onChange={set("parties")} placeholder={"Ecolab = DSV\nMitco = Freitan Logistics"} />
+            </label>
+          )}
         </>
       )}
       <div className="oo-modal-actions">

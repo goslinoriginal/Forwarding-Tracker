@@ -34,6 +34,8 @@ export default function Dashboard() {
   const sorted = pinSort(clients);
   // Clients with nothing left to monitor (all shipments archived) stay off the daily list
   const monitored = sorted.filter((c) => countFor(c.id) > 0 || c.flagged);
+  // Internal group reports (Mushrooms, Handovers) aren't sent, so they're not on the daily list
+  const reportable = monitored.filter((c) => !c.internal);
   const openClient = (id) => navigate(`/clients/${id}`);
 
   const tick = async (r) => {
@@ -55,16 +57,16 @@ export default function Dashboard() {
     if (dl) items.push({ label: `${dl} delayed`, tone: "red" });
     if (over) items.push({ label: `${over} cargo report${over > 1 ? "s" : ""} due today/overdue`, tone: "amb" });
     if (due.length - over) items.push({ label: `${due.length - over} cargo report${due.length - over > 1 ? "s" : ""} upcoming` });
-    if (!t) items.push({ label: "Daily report not sent" });
+    if (!t && !c.internal) items.push({ label: "Daily report not sent" });
     if (!items.length) items.push({ label: `All clear · sent ${t}`, tone: "grn" });
-    return { c, items, notSent: !t };
+    return { c, items, notSent: !t && !c.internal };
   });
 
   const counts = {};
   active.forEach((s) => { const k = s.carrier || "Other"; counts[k] = (counts[k] || 0) + 1; });
   const max = Math.max(1, ...Object.values(counts));
   const carriers = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
-  const sentCount = monitored.filter((c) => sent[c.id]).length;
+  const sentCount = reportable.filter((c) => sent[c.id]).length;
 
   return (
     <div className="oo-page" data-screen-label="Dashboard">
@@ -145,10 +147,10 @@ export default function Dashboard() {
         <div className="oo-card pad fade-up" style={{ animationDelay: ".24s" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
             <h2 className="oo-h2">Today's reports</h2>
-            <span className="oo-sub">{sentCount} of {monitored.length} sent</span>
+            <span className="oo-sub">{sentCount} of {reportable.length} sent</span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            {monitored.map((c) => {
+            {reportable.map((c) => {
               const t = sent[c.id];
               return (
                 <div key={c.id} className="oo-list-row">
@@ -160,7 +162,7 @@ export default function Dashboard() {
                 </div>
               );
             })}
-            {!monitored.length && <span className="oo-sub" style={{ padding: "12px 14px" }}>No clients with active shipments.</span>}
+            {!reportable.length && <span className="oo-sub" style={{ padding: "12px 14px" }}>No clients with active shipments.</span>}
           </div>
         </div>
         <div className="oo-card pad fade-up" style={{ animationDelay: ".28s" }}>

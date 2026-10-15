@@ -2,12 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api, OPTIONAL_COLUMNS } from "@/lib/api";
 import {
-  displayStatus, downloadReport, etaText, etdText, shipmentLegs, statusLabel,
+  displayStatus, etaText, etdText, shipmentLegs, statusLabel,
   useClients, useRefresh, useReportLog, useShipments,
 } from "@/lib/data";
 import { CARRIER_HUE, COMPANY_HUE, Pill, STATUS_HUE, Seg, Toggle, dm, useChip, useToast } from "@/lib/ui";
 import { NEW_ID, useEditor } from "@/components/ShipmentEditor";
 import ClientModal from "@/components/ClientModal";
+import DownloadMenu from "@/components/DownloadMenu";
 
 const STATUSES = ["All", "Planned", "Booked", "Shipped", "Delayed"];
 
@@ -77,13 +78,6 @@ export default function ClientDetail() {
     } catch { toast("Couldn't update the columns", { error: true }); }
   };
 
-  const exportAs = async (fmt) => {
-    try {
-      await downloadReport(client, fmt);
-      toast(`${fmt === "pdf" ? "PDF" : "Excel"} generated · ${mineActive.length} shipment${mineActive.length === 1 ? "" : "s"}`);
-    } catch { toast("Export failed", { error: true }); }
-  };
-
   return (
     <div className="oo-page detail" data-screen-label="Client detail">
       <div className="oo-head">
@@ -92,6 +86,7 @@ export default function ClientDetail() {
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <h1 className="oo-h1" style={{ fontSize: 34 }}>{client.name}</h1>
             <Pill hue={COMPANY_HUE[client.company]}>{client.company}</Pill>
+            {client.internal && <Pill>Internal group report</Pill>}
           </div>
           <p style={{ fontSize: 14, color: "var(--ink2)" }}>
             {mineActive.length} active · {mine.length - mineActive.length} archived (ANF / SOB's received) · {sentT ? `Report sent ${sentT}` : "Report not sent today"}
@@ -100,8 +95,7 @@ export default function ClientDetail() {
         <div className="oo-actions" style={{ position: "relative" }} ref={popRef}>
           <button type="button" className="oo-btn" onClick={() => setProfileOpen(true)}>Profile</button>
           <button type="button" className="oo-btn" onClick={() => setColsOpen(!colsOpen)} data-testid="column-settings-button">Columns</button>
-          <button type="button" className="oo-btn" onClick={() => exportAs("xlsx")}>Excel</button>
-          <button type="button" className="oo-btn" onClick={() => exportAs("pdf")}>PDF</button>
+          <DownloadMenu client={client} />
           <button type="button" className="oo-btn" onClick={() => openEditor(client.id, NEW_ID)}>+ Shipment</button>
           <button type="button" className="oo-btn primary" onClick={() => openEditor(client.id)}>Do status report</button>
           {colsOpen && (
@@ -160,7 +154,9 @@ export default function ClientDetail() {
               >
                 <span className="mono" style={{ fontSize: 13, fontWeight: 600, paddingTop: 1 }}>{s.file_number || "—"}</span>
                 <div style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0 }}>
-                  <span style={{ fontSize: 14, fontWeight: 500 }}>{s.supplier || "—"}</span>
+                  <span style={{ fontSize: 14, fontWeight: 500 }}>{s.supplier || s.end_client || "—"}</span>
+                  {s.end_client && s.supplier && <span style={{ fontSize: 12, color: "var(--accent-ink)" }}>For {s.end_client}{s.handover_party ? ` · via ${s.handover_party}` : ""}</span>}
+                  {s.end_client && !s.supplier && s.handover_party && <span style={{ fontSize: 12, color: "var(--accent-ink)" }}>Via {s.handover_party}</span>}
                   <span style={{ fontSize: 12, color: "var(--mute)", lineHeight: 1.4, whiteSpace: "pre-line" }}>{s.order_booking_file}</span>
                 </div>
                 <Pill hue={STATUS_HUE[st]} dot>{statusLabel(st, s.cargo_type)}</Pill>

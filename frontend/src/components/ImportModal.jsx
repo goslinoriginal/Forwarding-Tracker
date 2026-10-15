@@ -129,6 +129,9 @@ export default function ImportModal({ onClose, onDone }) {
                     <input className="oo-input" style={{ maxWidth: 280, fontWeight: 600 }} value={r.client.name} onChange={(e) => setName(i, e.target.value)} />
                     <Seg options={ENTITIES} value={r.client.company} onChange={(v) => setEntity(i, v)} />
                     {r.existing_client_id ? <Pill hue={COMPANY_HUE[r.client.company]}>Existing client — new shipments are added</Pill> : <Pill tone="grn">New client</Pill>}
+                    {r.client.report_layout !== "standard" && (
+                      <Pill tone="pur">Internal group · {r.client.report_layout === "mushrooms" ? "Mushrooms layout" : "Handovers layout"}</Pill>
+                    )}
                     <span className="oo-sub" style={{ marginLeft: "auto" }}>Report {dm(r.report_date)}{r.report_date.slice(0, 4)}</span>
                   </div>
                   <div style={{ padding: "8px 18px", fontSize: 12, color: "var(--mute)" }}>
@@ -138,7 +141,9 @@ export default function ImportModal({ onClose, onDone }) {
                   {r.shipments.map((s, k) => (
                     <div key={k} style={{ display: "grid", gridTemplateColumns: SHIP_COLS, gap: 12, padding: "9px 18px", borderTop: "1px solid var(--line2)", alignItems: "center", fontSize: 13, opacity: s.duplicate ? 0.5 : 1 }}>
                       <span className="mono" style={{ fontWeight: 600 }}>{s.file_number || "—"}</span>
-                      <span className="oo-ellipsis">{s.supplier || "—"}</span>
+                      <span className="oo-ellipsis" title={s.handover_party ? `Handover: ${s.handover_party}` : ""}>
+                        {[s.supplier, s.end_client].filter(Boolean).join(" → ") || "—"}
+                      </span>
                       <span className="oo-ellipsis" style={{ color: "var(--ink2)" }} title={s.tracking_doc_number}>{legsText(s)}</span>
                       <Pill hue={STATUS_HUE[statusOf(s)]} size="xs">{statusOf(s)}</Pill>
                       <span className="oo-ellipsis" style={{ fontSize: 12 }} title={s.original_comment}>

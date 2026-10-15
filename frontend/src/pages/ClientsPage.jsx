@@ -61,7 +61,7 @@ export default function ClientsPage() {
     .filter((c) => activity === "any" || (activity === "active" ? countFor(c.id) > 0 : countFor(c.id) === 0))
     .filter((c) => !hasDelays || delayedFor(c.id) > 0)
     .filter((c) => !onWater || onWaterFor(c.id) > 0)
-    .filter((c) => !unsent || !sent[c.id])
+    .filter((c) => !unsent || (!sent[c.id] && !c.internal))
     .filter((c) => !q || `${c.name} ${clientEmail(c)}`.toLowerCase().includes(q));
   // Pinned clients stay on top in their own order; everyone else follows the chosen sort
   const rows = [...filtered.filter((c) => c.pinned), ...filtered.filter((c) => !c.pinned).sort(cmp)];
@@ -151,7 +151,7 @@ export default function ClientsPage() {
                 <Pill hue={COMPANY_HUE[c.company]}>{c.company}</Pill>
                 <span className="mono r">{countFor(c.id)}</span>
                 <span className="mono r" style={{ color: dl ? "var(--red-fg)" : "var(--faint)" }}>{dl}</span>
-                {t ? <Pill tone="grn">Sent {t}</Pill> : <Pill style={{ color: "var(--mute)" }}>Not sent</Pill>}
+                {c.internal ? <Pill>Internal</Pill> : t ? <Pill tone="grn">Sent {t}</Pill> : <Pill style={{ color: "var(--mute)" }}>Not sent</Pill>}
                 <span className="oo-ellipsis" style={{ fontSize: 12, color: "var(--mute)" }}>{extra.length ? extra.join(" · ") : "Standard only"}</span>
                 <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
                   {c.pinned && (

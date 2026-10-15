@@ -3,6 +3,7 @@ import { api, CARRIERS, carrierTrackUrl, clipboardTrackingNumber } from "@/lib/a
 import {
   displayStatus, downloadReport, openReportEmail, receivedLabel, shipmentLegs, statusLabel,
   useClients, useRefresh, useReportLog, useSettings, useShipments, useVessels,
+  isGroupClient,
 } from "@/lib/data";
 import { STATUS_HUE, Pill, copyText, dmy, nowHm, parseDayInput, todayIso, useToast } from "@/lib/ui";
 
@@ -27,6 +28,10 @@ function toForm(s) {
     expected_freight_rate: s.expected_freight_rate || "", copy_docs_status: s.copy_docs_status || "",
     hbill: s.hbill_released === true ? "Yes" : s.hbill_released === false ? "No" : "",
     comment_note: s.comment_note || "",
+    comment_lead: s.comment_lead || "",
+    end_client: s.end_client || "", handover_party: s.handover_party || "", fcl_count: s.fcl_count || "",
+    obill_refs: s.obill_refs || "", doc_draft_bills: s.doc_draft_bills || "",
+    doc_copy_invoices: s.doc_copy_invoices || "", doc_original_invoices: s.doc_original_invoices || "",
   };
 }
 
@@ -44,6 +49,10 @@ function toPayload(f) {
     expected_freight_rate: f.expected_freight_rate.trim(), copy_docs_status: f.copy_docs_status.trim(),
     hbill_released: f.hbill === "Yes" ? true : f.hbill === "No" ? false : null,
     comment_note: f.comment_note.trim(),
+    comment_lead: f.comment_lead.trim(),
+    end_client: f.end_client.trim(), handover_party: f.handover_party.trim(), fcl_count: f.fcl_count.trim(),
+    obill_refs: f.obill_refs.trim(), doc_draft_bills: f.doc_draft_bills,
+    doc_copy_invoices: f.doc_copy_invoices, doc_original_invoices: f.doc_original_invoices,
   };
 }
 
@@ -122,6 +131,13 @@ function ShipmentEditor({ clientId, shipId, onClose }) {
   const commit = async (id) => {
     if (id !== NEW_ID && !isDirty(id)) return id;
     const payload = toPayload(formOf(id));
+    // Handovers: fill the clearing agent from the client's handover list when left blank
+    if (!payload.handover_party && payload.end_client) {
+      const parties = client.handover_parties || {};
+      const key = Object.keys(parties).find((k) => k.toLowerCase() === payload.end_client.toLowerCase())
+        || Object.keys(parties).find((k) => k.toLowerCase().split(" ")[0] === payload.end_client.toLowerCase().split(" ")[0]);
+      if (key) payload.handover_party = parties[key];
+    }
     let savedId = id;
     if (id === NEW_ID) {
       if (!payload.supplier && !payload.vessel_name && !payload.tracking_doc_number && !payload.file_number) {
@@ -187,6 +203,12 @@ function ShipmentEditor({ clientId, shipId, onClose }) {
     const fmt = settings?.export_format || "PDF + Excel";
     if (fmt.includes("PDF")) await downloadReport(client, "pdf");
     if (fmt.includes("Excel")) await downloadReport(client, "xlsx");
+    if (client.internal) {
+      // Internal group reports aren't emailed to anyone or tracked as "sent"
+      await refresh();
+      toast(`Report downloaded${saved ? ` · ${saved} edit${saved > 1 ? "s" : ""} saved` : ""}`);
+      return;
+    }
     await api.post(`/clients/${client.id}/report-sent`, { date: todayIso(), time: nowHm() });
     await refresh();
     const mailed = openReportEmail(client);
@@ -210,7 +232,7 @@ function ShipmentEditor({ clientId, shipId, onClose }) {
   const sentT = sent[client.id];
   const presets = settings?.quick_comments || [];
   const appendNote = (t) => upd((f) => ({ ...f, comment_note: (f.comment_note.trim() ? f.comment_note.trim() + " " : "") + t }));
-  const autoComment = current ? (current.comments || "").replace(/^\s*\d{1,2}\.\d{1,2}\s*-\s*/, "").replace(fm.comment_note.trim(), "").trim() : "";
+  const autoComment = current ? (current.comments || "").replace(/^\s*\d{1,2}\.\d{1,2}\s*-\s*/, "").replace(fm.comment_lead.trim(), "").replace(fm.comment_note.trim(), "").trim() : "";
 
   return (
     <div className="oo-sheet" data-screen-label="Status report editor">
@@ -228,7 +250,7 @@ function ShipmentEditor({ clientId, shipId, onClose }) {
         <div className="oo-actions">
           <button type="button" className="oo-btn" onClick={() => run(async () => { await downloadReport(client, "xlsx"); toast("Excel downloaded"); })}>Excel</button>
           <button type="button" className="oo-btn" onClick={() => run(async () => { await downloadReport(client, "pdf"); toast("PDF downloaded"); })}>PDF</button>
-          <button type="button" className="oo-btn primary" onClick={sendReport} disabled={busy}>{sentT ? "Resend report" : "Send report"}</button>
+          <button type="button" className="oo-btn primary" onClick={sendReport} disabled={busy}>{client.internal ? "Download report" : sentT ? "Resend report" : "Send report"}</button>
         </div>
       </header>
 
@@ -334,6 +356,30 @@ function ShipmentEditor({ clientId, shipId, onClose }) {
                 <Field label="Copy docs status"><input className="oo-input" value={fm.copy_docs_status} onChange={set("copy_docs_status")} /></Field>
                 <span />
 
+                {isGroupClient(client) && (
+                  <>
+                    <Field label={client.report_layout === "mushrooms" ? "End client (report split)" : "Client"}>
+                      <input className="oo-input" list="oo-end-clients" value={fm.end_client} onChange={set("end_client")} placeholder={client.report_layout === "mushrooms" ? "e.g. Country Mushrooms" : "e.g. Ecolab"} />
+                    </Field>
+                    {client.report_layout === "handovers" ? (
+                      <>
+                        <Field label="Handover party">
+                          <input className="oo-input" value={fm.handover_party} onChange={set("handover_party")} placeholder={(client.handover_parties || {})[fm.end_client] || "Clearing agent"} />
+                        </Field>
+                        <span /><span />
+                      </>
+                    ) : (
+                      <>
+                        <Field label="No. of FCLs"><input className="oo-input" value={fm.fcl_count} onChange={set("fcl_count")} /></Field>
+                        <Field label="O/Bill — containers & refs" span={2}><input className="oo-input mono" value={fm.obill_refs} onChange={set("obill_refs")} placeholder="MSNU1521512, MSBU3417644, NLRTM-XEN-SE-002420" /></Field>
+                        <Field label="Draft/Copy bills received"><input type="date" className="oo-input" value={fm.doc_draft_bills} onChange={set("doc_draft_bills")} /></Field>
+                        <Field label="Copy invoices & phyto's received"><input type="date" className="oo-input" value={fm.doc_copy_invoices} onChange={set("doc_copy_invoices")} /></Field>
+                        <Field label="Original invoices & phyto's received"><input type="date" className="oo-input" value={fm.doc_original_invoices} onChange={set("doc_original_invoices")} /></Field>
+                        <span />
+                      </>
+                    )}
+                  </>
+                )}
                 <Field label="Final destination"><input className="oo-input" value={fm.final_destination} onChange={set("final_destination")} /></Field>
                 <Field label="Expected freight rate"><input className="oo-input" value={fm.expected_freight_rate} onChange={set("expected_freight_rate")} /></Field>
                 <Field label="H/bill released by supplier">
@@ -355,6 +401,12 @@ function ShipmentEditor({ clientId, shipId, onClose }) {
 
               <div style={{ flex: 1, minHeight: 120, display: "flex", flexDirection: "column", gap: 8 }}>
                 <span className="oo-label">Comments</span>
+                <input
+                  className="oo-input"
+                  value={fm.comment_lead}
+                  onChange={set("comment_lead")}
+                  placeholder={isGroupClient(client) ? "Starts with, e.g. BVB/Country. Copy Docs received." : "Optional — text before the automatic comment"}
+                />
                 {autoComment && (
                   <div style={{ fontSize: 13, color: "var(--ink2)", lineHeight: 1.5 }} title="Written automatically from the vessel dates and sailings">
                     <span style={{ color: "var(--mute)" }}>Auto · </span>{autoComment}
@@ -390,6 +442,9 @@ function ShipmentEditor({ clientId, shipId, onClose }) {
         </div>
       </footer>
       <datalist id="oo-vessels">{vessels.map((v) => <option key={v} value={v} />)}</datalist>
+      <datalist id="oo-end-clients">
+        {[...new Set(ships.filter((s) => s.client_id === clientId && s.end_client).map((s) => s.end_client))].map((v) => <option key={v} value={v} />)}
+      </datalist>
     </div>
   );
 }

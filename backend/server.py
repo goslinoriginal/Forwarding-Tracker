@@ -98,6 +98,11 @@ class Client(BaseModel):
     pinned: bool = False
     pin_order: Optional[int] = None  # position among pinned clients (lower = higher up)
     flagged: bool = False  # priority client — surfaced on the dashboard
+    # Group clients (e.g. Mushrooms, Handovers) bundle several end clients in one report
+    # with their own column layout; "internal" ones aren't emailed to anyone directly.
+    report_layout: str = "standard"  # standard | mushrooms | handovers
+    internal: bool = False
+    handover_parties: dict = Field(default_factory=dict)  # end client -> clearing agent
     email_to: Optional[str] = None  # recipient(s) for the status-report email draft, comma-separated
     email_cc: Optional[str] = None  # cc'd address(es), comma-separated
     email_greeting: Optional[str] = None  # e.g. "Roland and Jessica" for "Dear ..."
@@ -125,6 +130,8 @@ class ClientUpdate(BaseModel):
     default_pod: Optional[str] = None
     pinned: Optional[bool] = None
     flagged: Optional[bool] = None
+    internal: Optional[bool] = None
+    handover_parties: Optional[dict] = None
     email_to: Optional[str] = None
     email_cc: Optional[str] = None
     email_greeting: Optional[str] = None
@@ -161,6 +168,14 @@ class Shipment(BaseModel):
     final_destination: Optional[str] = None
     comments: str = ""
     comment_note: str = ""  # typed by ops; appended after the auto-generated status comment
+    comment_lead: str = ""  # wording that comes before the automatic comment, e.g. "BVB/Country."
+    end_client: Optional[str] = None  # group reports: who the shipment is for
+    handover_party: Optional[str] = None
+    fcl_count: Optional[str] = None
+    obill_refs: Optional[str] = None  # containers / references listed after the O/Bill
+    doc_draft_bills: Optional[str] = None  # YYYY-MM-DD document-received dates
+    doc_copy_invoices: Optional[str] = None
+    doc_original_invoices: Optional[str] = None
     hbill_released: Optional[bool] = None
     expected_freight_rate: Optional[str] = None
     copy_docs_status: Optional[str] = None
@@ -195,6 +210,14 @@ class ShipmentCreate(BaseModel):
     final_destination: Optional[str] = None
     comments: str = ""
     comment_note: str = ""
+    comment_lead: str = ""  # wording that comes before the automatic comment, e.g. "BVB/Country."
+    end_client: Optional[str] = None  # group reports: who the shipment is for
+    handover_party: Optional[str] = None
+    fcl_count: Optional[str] = None
+    obill_refs: Optional[str] = None  # containers / references listed after the O/Bill
+    doc_draft_bills: Optional[str] = None  # YYYY-MM-DD document-received dates
+    doc_copy_invoices: Optional[str] = None
+    doc_original_invoices: Optional[str] = None
     hbill_released: Optional[bool] = None
     expected_freight_rate: Optional[str] = None
     copy_docs_status: Optional[str] = None
@@ -223,6 +246,14 @@ class ShipmentUpdate(BaseModel):
     final_destination: Optional[str] = None
     comments: Optional[str] = None
     comment_note: Optional[str] = None
+    comment_lead: Optional[str] = None
+    end_client: Optional[str] = None
+    handover_party: Optional[str] = None
+    fcl_count: Optional[str] = None
+    obill_refs: Optional[str] = None
+    doc_draft_bills: Optional[str] = None
+    doc_copy_invoices: Optional[str] = None
+    doc_original_invoices: Optional[str] = None
     hbill_released: Optional[bool] = None
     expected_freight_rate: Optional[str] = None
     copy_docs_status: Optional[str] = None
@@ -328,6 +359,10 @@ async def update_client(client_id: str, payload: ClientUpdate):
             updates["pin_order"] = None
     if payload.flagged is not None:
         updates["flagged"] = payload.flagged
+    if payload.internal is not None:
+        updates["internal"] = payload.internal
+    if payload.handover_parties is not None:
+        updates["handover_parties"] = {k.strip(): (v or "").strip() for k, v in payload.handover_parties.items() if k.strip()}
     if payload.optional_columns is not None:
         merged = dict(existing.get("optional_columns") or DEFAULT_OPTIONAL_COLUMNS)
         for k, v in payload.optional_columns.items():
@@ -470,6 +505,9 @@ def _regenerate_comment(ship: dict) -> str:
     legs = _vessel_legs(ship)
     multi = len(legs) > 1
     parts: list[str] = []
+    lead = (ship.get("comment_lead") or "").strip()
+    if lead:
+        parts.append(lead)
     all_sailed = True
 
     for leg in legs:
@@ -505,7 +543,7 @@ def _regenerate_comment(ship: dict) -> str:
     # Awaiting clause — skipped when ops wrote their own "Awaiting ..." note. Once the
     # shipment is closed off it reads "ANF received" (FCL) / "SOB's received" (LCL) instead.
     is_lcl = (ship.get("cargo_type") or "FCL").upper() == "LCL"
-    own_awaiting = bool(re.match(r"\s*awaiting\b", ship.get("comment_note") or "", re.I))
+    own_awaiting = bool(re.search(r"(^|\.\s*)awaiting\b", f"{lead} {ship.get('comment_note') or ''}".strip(), re.I))
     note_text = (ship.get("comment_note") or "").lower()
     if ship.get("anf_received"):
         if "received" not in note_text:
@@ -524,7 +562,7 @@ def _regenerate_comment(ship: dict) -> str:
     if note:
         parts.append(note)
 
-    body = " ".join(p for p in parts if p)
+    body = re.sub(r"\.{2,}", ".", " ".join(p for p in parts if p))
     return prefix + body if body else prefix.rstrip()
 
 
@@ -882,7 +920,25 @@ OPTIONAL_KEYS = {
 }
 
 
+# Group reports keep the exact columns of their original spreadsheets
+LAYOUT_COLUMNS = {
+    "mushrooms": [
+        ("file_number", "File No."), ("sob_date", "SOB Date"), ("obill", "O/Bill"), ("fcl_count", "No. of FCLs"),
+        ("vessel_block", "Vessel"), ("eta", "ETA Durban"), ("doc_draft_bills", "Draft/Copy Bills Received"),
+        ("doc_copy_invoices", "Copy Invoices & Phyto's Received"),
+        ("doc_original_invoices", "Original Invoices & Phyto's Received"), ("comments", "Comments"),
+    ],
+    "handovers": [
+        ("end_client", "Client"), ("order_booking_file", "Order"), ("file_number", "Booking File"),
+        ("status", "Shipped Pending"), ("vessel_block", "Vessel"), ("eta", "Planned ETA"),
+        ("final_destination", "Final Destination"), ("comments", "Comments"), ("days_to_arrival", "Days till arrival"),
+    ],
+}
+
+
 def _columns_for_client(client: dict) -> list[tuple[str, str]]:
+    if client.get("report_layout") in LAYOUT_COLUMNS:
+        return list(LAYOUT_COLUMNS[client["report_layout"]])
     optional = client.get("optional_columns") or DEFAULT_OPTIONAL_COLUMNS
     result: list[tuple[str, str]] = []
     for key, label in STANDARD_COLUMNS:
@@ -902,9 +958,20 @@ def _cell_value(key: str, ship: dict) -> str:
                 label = f" ({_ordinal(leg['index'])} Vessel)" if multi else ""
                 parts.append(leg["name"] + label)
         doc = ship.get("tracking_doc_number") or ""
-        if doc:
+        if doc and not ship.get("_doc_in_obill"):
             parts.append(doc)
         return "\n".join(parts)
+    if key == "obill":
+        return ", ".join(x for x in [ship.get("tracking_doc_number"), ship.get("obill_refs")] if x)
+    if key in ("doc_draft_bills", "doc_copy_invoices", "doc_original_invoices"):
+        val = ship.get(key)
+        return (_fmt_dot_full(_to_iso_or_original(val)) or val) if val else ""
+    if key == "days_to_arrival":
+        target = ship.get("eta") or ship.get("planned_eta")
+        try:
+            return str((date.fromisoformat(target) - date.today()).days)
+        except Exception:
+            return ""
     if key == "eta":
         val = ship.get("eta")
         if val:
@@ -932,12 +999,22 @@ def _cell_value(key: str, ship: dict) -> str:
     return "" if val is None else str(val)
 
 
-async def _report_rows(client_id: str):
-    client = await _get_client(client_id)
-    shipments = await db.shipments.find(
-        {"client_id": client_id, "anf_received": {"$ne": True}},
-        _proj(),
-    ).sort("created_at", 1).to_list(5000)
+async def _active_shipments_for_report(client: dict, end_client: Optional[str] = None) -> tuple[dict, list[dict]]:
+    """Active shipments for a report. With end_client (group reports split per client)
+    only that client's shipments are included and the report is headed with their name."""
+    query: dict[str, Any] = {"client_id": client["id"], "anf_received": {"$ne": True}}
+    if end_client:
+        query["end_client"] = end_client
+        client = {**client, "name": end_client}
+    shipments = await db.shipments.find(query, _proj()).sort("created_at", 1).to_list(5000)
+    in_obill = any(k == "obill" for k, _ in _columns_for_client(client))
+    for s in shipments:
+        s["_doc_in_obill"] = in_obill
+    return client, shipments
+
+
+async def _report_rows(client_id: str, end_client: Optional[str] = None):
+    client, shipments = await _active_shipments_for_report(await _get_client(client_id), end_client)
     for s in shipments:
         s["comments"] = _regenerate_comment(s)
         s["status"] = _derive_status(s)
@@ -1270,11 +1347,23 @@ def _build_pdf(client: dict, columns: list[tuple[str, str]], rows: list[dict]) -
     return buffer.getvalue()
 
 
+def _safe_name(name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("_") or "client"
+
+
+@api_router.get("/reports/{client_id}/end-clients")
+async def report_end_clients(client_id: str):
+    """End clients with active shipments — the per-client split of a group report."""
+    await _get_client(client_id)
+    names = await db.shipments.distinct("end_client", {"client_id": client_id, "anf_received": {"$ne": True}})
+    return {"end_clients": sorted(n for n in names if n)}
+
+
 @api_router.get("/reports/{client_id}/xlsx")
-async def export_xlsx(client_id: str):
-    client, columns, rows = await _report_rows(client_id)
+async def export_xlsx(client_id: str, end_client: Optional[str] = None):
+    client, columns, rows = await _report_rows(client_id, end_client)
     content = _build_xlsx(client, columns, rows)
-    filename = f"shipping-report-{client['name'].replace(' ', '_')}-{datetime.now(timezone.utc).strftime('%Y%m%d')}.xlsx"
+    filename = f"shipping-report-{_safe_name(client['name'])}-{datetime.now(timezone.utc).strftime('%Y%m%d')}.xlsx"
     return StreamingResponse(
         io.BytesIO(content),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1283,10 +1372,10 @@ async def export_xlsx(client_id: str):
 
 
 @api_router.get("/reports/{client_id}/pdf")
-async def export_pdf(client_id: str):
-    client, columns, rows = await _report_rows(client_id)
+async def export_pdf(client_id: str, end_client: Optional[str] = None):
+    client, columns, rows = await _report_rows(client_id, end_client)
     content = _build_pdf(client, columns, rows)
-    filename = f"shipping-report-{client['name'].replace(' ', '_')}-{datetime.now(timezone.utc).strftime('%Y%m%d')}.pdf"
+    filename = f"shipping-report-{_safe_name(client['name'])}-{datetime.now(timezone.utc).strftime('%Y%m%d')}.pdf"
     return StreamingResponse(
         io.BytesIO(content),
         media_type="application/pdf",
@@ -1331,6 +1420,14 @@ _SR_COLUMNS = {
     "copy_docs_status": ("Copy Docs Status", 13, 96),
     "hbill_released": ("H/bill Released", 13, 96),
     "expected_freight_rate": ("Freight Rate / Ctr", 16, 100),
+    # group-report columns
+    "obill": ("O/Bill", 30, 210),
+    "fcl_count": ("No. of FCLs", 10, 70),
+    "doc_draft_bills": ("Draft/Copy Bills Received", 14, 112),
+    "doc_copy_invoices": ("Copy Invoices & Phyto's Received", 15, 112),
+    "doc_original_invoices": ("Original Invoices & Phyto's Received", 15, 112),
+    "end_client": ("Client", 21, 120),
+    "days_to_arrival": ("Days till arrival", 11, 80),
 }
 _SR_PANEL_KEYS = {"copy_docs_status", "hbill_released", "expected_freight_rate"}
 _SR_STATUS_OPTIONS = ["Shipped", "Booked", "Pending", "Planned"]
@@ -1397,6 +1494,12 @@ def _sr_updated_dd_mm(value: Optional[str]) -> str:
         return ""
 
 
+def _sr_labels(columns: list[tuple[str, str]], client: dict) -> dict:
+    """Header text per column: the design's labels, or the group layout's own labels."""
+    custom = client.get("report_layout") in LAYOUT_COLUMNS
+    return {k: (label if custom or k not in _SR_COLUMNS else _SR_COLUMNS[k][0]) for k, label in columns}
+
+
 def _sr_vessel_text(ship: dict) -> str:
     """Each vessel on its own line, with its "(1st Vessel)" label on the line below."""
     legs = _vessel_legs(ship)
@@ -1407,16 +1510,13 @@ def _sr_vessel_text(ship: dict) -> str:
             parts.append(leg["name"])
             if multi:
                 parts.append(f"({_ordinal(leg['index'])} Vessel)")
-    if ship.get("tracking_doc_number"):
+    if ship.get("tracking_doc_number") and not ship.get("_doc_in_obill"):
         parts.append(ship["tracking_doc_number"])
     return "\n".join(parts)
 
 
-async def _modern_report_rows(client_id: str):
-    client = await _get_client(client_id)
-    shipments = await db.shipments.find(
-        {"client_id": client_id, "anf_received": {"$ne": True}}, _proj(),
-    ).sort("created_at", 1).to_list(5000)
+async def _modern_report_rows(client_id: str, end_client: Optional[str] = None):
+    client, shipments = await _active_shipments_for_report(await _get_client(client_id), end_client)
     columns = _columns_for_client(client)
     rows = []
     for s in shipments:
@@ -1433,6 +1533,7 @@ async def _modern_report_rows(client_id: str):
 
 
 def _build_xlsx_modern(client: dict, columns: list[tuple[str, str]], rows: list[dict]) -> bytes:
+    LBL = _sr_labels(columns, client)
     wb = Workbook()
     ws = wb.active
     ws.title = "Status Report"
@@ -1447,7 +1548,7 @@ def _build_xlsx_modern(client: dict, columns: list[tuple[str, str]], rows: list[
     base_widths = [_SR_COLUMNS[k][1] for k in keys]
     widths = []
     for key, base in zip(keys, base_widths):
-        need = max(_xl_text_units(word, 13, bold=True) for word in _SR_COLUMNS[key][0].upper().split())
+        need = max(_xl_text_units(word, 13, bold=True) for word in LBL[key].upper().split())
         if key not in ("comments", "order_booking_file", "vessel_block"):
             for row in rows:
                 for token in str(row.get(key, "") or "").split():
@@ -1537,7 +1638,7 @@ def _build_xlsx_modern(client: dict, columns: list[tuple[str, str]], rows: list[
     # Row 4: column headings
     header_row = 4
     for col, (key, _) in enumerate(columns, start=1):
-        c = ws.cell(row=header_row, column=col, value=_SR_COLUMNS[key][0].upper())
+        c = ws.cell(row=header_row, column=col, value=LBL[key].upper())
         c.font = Font(name="Calibri", size=13, bold=True, color="FFFFFF")
         c.fill = solid(_SR_ACCENT_600 if key in _SR_PANEL_KEYS else _SR_ACCENT_500)
         c.alignment = Alignment(vertical="center", wrap_text=True, indent=1)
@@ -1545,7 +1646,7 @@ def _build_xlsx_modern(client: dict, columns: list[tuple[str, str]], rows: list[
     head_lines = 1
     for key, w in zip(keys, widths):
         lines, used = 1, 0.0
-        for word in _SR_COLUMNS[key][0].upper().split():
+        for word in LBL[key].upper().split():
             wu = _xl_text_units(word, 13, bold=True)
             if used and used + 0.6 + wu > w - _XL_CELL_PAD:
                 lines, used = lines + 1, wu
@@ -1670,6 +1771,7 @@ def _build_xlsx_modern(client: dict, columns: list[tuple[str, str]], rows: list[
 
 
 def _build_pdf_modern(client: dict, columns: list[tuple[str, str]], rows: list[dict]) -> bytes:
+    LBL = _sr_labels(columns, client)
     page_width, _ = landscape(A3)
     margin = 10 * mm
     available_width = page_width - 2 * margin
@@ -1788,7 +1890,7 @@ def _build_pdf_modern(client: dict, columns: list[tuple[str, str]], rows: list[d
     # Column headings wrap between words only, so size them to fit the longest word
     head_size = 16 * t
     for k, w in zip(keys, col_widths):
-        for word in _SR_COLUMNS[k][0].upper().split():
+        for word in LBL[k].upper().split():
             head_size = min(head_size, (w - 2 * pad_h - 1) / stringWidth(word, "Helvetica-Bold", 1))
     header_style = pstyle("SRHead", head_size / t, "FFFFFF", bold=True, leading=1.15, scale=t)
     body = pstyle("SRBody", 16, _SR_TEXT, leading=1.45, scale=t)
@@ -1850,7 +1952,7 @@ def _build_pdf_modern(client: dict, columns: list[tuple[str, str]], rows: list[d
         "supplier": supplier_style, "file_number": body_bold, "eta": eta_style,
         "copy_docs_status": docs_style, "expected_freight_rate": rate_style,
     }
-    table_data = [[para(_SR_COLUMNS[k][0].upper(), header_style) for k in keys]]
+    table_data = [[para(LBL[k].upper(), header_style) for k in keys]]
     for row in rows:
         cells = []
         for i, key in enumerate(keys):
@@ -1954,10 +2056,10 @@ def _build_pdf_modern(client: dict, columns: list[tuple[str, str]], rows: list[d
 
 
 @api_router.get("/reports/{client_id}/xlsx-modern")
-async def export_xlsx_modern(client_id: str):
-    client, columns, rows = await _modern_report_rows(client_id)
+async def export_xlsx_modern(client_id: str, end_client: Optional[str] = None):
+    client, columns, rows = await _modern_report_rows(client_id, end_client)
     content = _build_xlsx_modern(client, columns, rows)
-    filename = f"status-report-{client['name'].replace(' ', '_')}-{datetime.now(timezone.utc).strftime('%Y%m%d')}.xlsx"
+    filename = f"status-report-{_safe_name(client['name'])}-{datetime.now(timezone.utc).strftime('%Y%m%d')}.xlsx"
     return StreamingResponse(
         io.BytesIO(content),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -1966,10 +2068,10 @@ async def export_xlsx_modern(client_id: str):
 
 
 @api_router.get("/reports/{client_id}/pdf-modern")
-async def export_pdf_modern(client_id: str):
-    client, columns, rows = await _modern_report_rows(client_id)
+async def export_pdf_modern(client_id: str, end_client: Optional[str] = None):
+    client, columns, rows = await _modern_report_rows(client_id, end_client)
     content = _build_pdf_modern(client, columns, rows)
-    filename = f"status-report-{client['name'].replace(' ', '_')}-{datetime.now(timezone.utc).strftime('%Y%m%d')}.pdf"
+    filename = f"status-report-{_safe_name(client['name'])}-{datetime.now(timezone.utc).strftime('%Y%m%d')}.pdf"
     return StreamingResponse(
         io.BytesIO(content),
         media_type="application/pdf",
@@ -2177,13 +2279,19 @@ async def import_commit(payload: ImportCommitPayload):
             continue
         company = info.get("company") if info.get("company") in COMPANIES else "Patuma"
         columns = {k: bool(v) for k, v in (info.get("optional_columns") or {}).items() if k in DEFAULT_OPTIONAL_COLUMNS}
+        layout = info.get("report_layout") if info.get("report_layout") in LAYOUT_COLUMNS else "standard"
+        group = {"report_layout": layout, "internal": bool(info.get("internal")), "handover_parties": info.get("handover_parties") or {}}
         client = await _client_by_name(name)
         if client:
             merged = {**(client.get("optional_columns") or {}), **{k: True for k, v in columns.items() if v}}
-            await db.clients.update_one({"id": client["id"]}, {"$set": {"optional_columns": merged}})
+            changes: dict[str, Any] = {"optional_columns": merged}
+            if layout != "standard":
+                changes.update(report_layout=layout, internal=group["internal"],
+                               handover_parties={**(client.get("handover_parties") or {}), **group["handover_parties"]})
+            await db.clients.update_one({"id": client["id"]}, {"$set": changes})
             updated_clients += 1
         else:
-            client = Client(name=name, company=company, optional_columns={**DEFAULT_OPTIONAL_COLUMNS, **columns}).model_dump()
+            client = Client(name=name, company=company, optional_columns={**DEFAULT_OPTIONAL_COLUMNS, **columns}, **group).model_dump()
             await db.clients.insert_one(dict(client))
             created_clients += 1
 

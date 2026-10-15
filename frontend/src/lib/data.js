@@ -65,18 +65,29 @@ export function etdText(s) {
 export const etaText = (s) => dm(s.eta || s.planned_eta) || "—";
 
 /* ---------- Report downloads ---------- */
-export async function downloadReport(client, fmt) {
-  const res = await fetch(`${API}/reports/${client.id}/${fmt}-modern`);
+/** Downloads a status report. `old` gives the original operational layout; `endClient`
+ *  gives one end client's share of a group report (e.g. "Country Mushrooms"). */
+export async function downloadReport(client, fmt, { old = false, endClient = "" } = {}) {
+  const qs = endClient ? `?end_client=${encodeURIComponent(endClient)}` : "";
+  const res = await fetch(`${API}/reports/${client.id}/${fmt}${old ? "" : "-modern"}${qs}`);
   if (!res.ok) throw new Error("Export failed");
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `status-report-${(client.name || "client").replace(/\s+/g, "_")}-${todayIso()}.${fmt}`;
+  const name = (endClient || client.name || "client").replace(/[^A-Za-z0-9._-]+/g, "_");
+  a.download = `${old ? "shipping-report" : "status-report"}-${name}-${todayIso()}.${fmt}`;
   document.body.appendChild(a);
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+export const isGroupClient = (c) => !!c && c.report_layout && c.report_layout !== "standard";
+
+export async function fetchEndClients(clientId) {
+  const res = await fetch(`${API}/reports/${clientId}/end-clients`);
+  return res.ok ? (await res.json()).end_clients : [];
 }
 
 /** Opens the client's pre-filled status-report email in the mail app. */

@@ -18,6 +18,17 @@ from openpyxl import load_workbook
 
 # header text (lower-case, punctuation removed) -> field
 HEADER_ALIASES = [
+    # group-report columns (Mushrooms / Handovers) first, so they win over generic ones
+    ("o bill", "obill"),
+    ("no of fcls", "fcl_count"),
+    ("fcls", "fcl_count"),
+    ("draft", "doc_draft_bills"),
+    ("copy bills", "doc_draft_bills"),
+    ("original invoices", "doc_original_invoices"),
+    ("copy invoices", "doc_copy_invoices"),
+    ("days till arrival", "days_to_arrival"),
+    ("h over party", "handover_party"),
+    ("client", "end_client"),
     ("supplier", "supplier"),
     ("order", "order_booking_file"),
     ("booking file", "file_number"),
@@ -176,9 +187,10 @@ def parse_report(data: bytes, filename: str, cutoff: date) -> dict:
     warnings: list[str] = []
 
     rows = [[c.value for c in row] for row in ws.iter_rows()]
-    header_idx = next((i for i, r in enumerate(rows) if any(_key(v) == "supplier" for v in r)), None)
+    # The header is the first row where at least three cells are known column names
+    header_idx = next((i for i, r in enumerate(rows) if sum(1 for v in r if _field_for(v)) >= 3), None)
     if header_idx is None:
-        raise ValueError("No header row with 'Supplier' found")
+        raise ValueError("No header row found (expected columns like Supplier, Order, Vessel, Comments)")
 
     # Client name, report date and title above the header
     client_name, report_date, title = "", None, ""
@@ -234,9 +246,23 @@ def parse_report(data: bytes, filename: str, cutoff: date) -> dict:
         extras = [f"{h}: {_norm(r[i])}" for i, h in extra_cols.items() if i < len(r) and _norm(r[i])]
         if extras:
             rec["order_booking_file"] = "\n".join([x for x in [rec.get("order_booking_file", "")] if x] + extras)
-        if not (rec.get("supplier") or rec.get("file_number") or rec.get("order_booking_file")):
+        if not (rec.get("supplier") or rec.get("file_number") or rec.get("order_booking_file") or rec.get("end_client")):
             continue
         shipments.append(_parse_row(rec, r, cols, report_date, cutoff))
+
+    # Group layouts: Mushrooms (O/Bill + document dates) and Handovers (a Client column)
+    fields = set(cols.values())
+    layout = "mushrooms" if "obill" in fields else "handovers" if "end_client" in fields else "standard"
+    handover_parties = _handover_parties(wb, ws) if layout == "handovers" else {}
+    for sh in shipments:
+        if layout == "mushrooms":
+            # "BVB/Country." -> supplier BVB, report split to "Country Mushrooms"
+            lm = re.match(r"\s*([^/.]+?)\s*/\s*([^/.]+?)\s*\.", sh["comment_lead"])
+            if lm:
+                sh["supplier"] = sh["supplier"] or lm.group(1).strip()
+                sh["end_client"] = f"{lm.group(2).strip()} Mushrooms"
+        if layout == "handovers" and sh.get("end_client"):
+            sh["handover_party"] = sh.get("handover_party") or _match_party(sh["end_client"], handover_parties)
 
     return {
         "file": filename,
@@ -244,11 +270,56 @@ def parse_report(data: bytes, filename: str, cutoff: date) -> dict:
             "name": client_name,
             "company": company,
             "optional_columns": {k: k in cols.values() for k in OPTIONAL_FIELDS},
+            "report_layout": layout,
+            "internal": layout != "standard",
+            "handover_parties": handover_parties,
         },
         "report_date": report_date.isoformat(),
         "shipments": shipments,
         "warnings": warnings,
     }
+
+
+def _handover_parties(wb, report_ws) -> dict:
+    """The 'Client / H/over Party' list on another sheet of the Handovers workbook."""
+    out: dict = {}
+    for ws in wb.worksheets:
+        if ws is report_ws:
+            continue
+        rows = [[c.value for c in r] for r in ws.iter_rows()]
+        for i, r in enumerate(rows):
+            keys = [_key(v) for v in r]
+            if "client" in keys and any("over" in k for k in keys):
+                ci = keys.index("client")
+                pi = next(j for j, k in enumerate(keys) if "over" in k)
+                for row in rows[i + 1:]:
+                    name = _norm(row[ci]) if ci < len(row) else ""
+                    party = _norm(row[pi]) if pi < len(row) else ""
+                    if name:
+                        out[name] = party
+                break
+    return out
+
+
+def _match_party(client: str, parties: dict) -> Optional[str]:
+    """'Fowkes' matches 'Fowkes Bros'; exact (case-insensitive) matches win."""
+    c = client.lower().strip()
+    for name, party in parties.items():
+        if name.lower() == c:
+            return party
+    first = c.split()[0] if c else ""
+    for name, party in parties.items():
+        if first and name.lower().split()[0] == first:
+            return party
+    return None
+
+
+def _date_cell(raw: list, cols: dict, field: str) -> Optional[str]:
+    idx = next((i for i, f in cols.items() if f == field), None)
+    if idx is None or idx >= len(raw):
+        return None
+    d = _cell_date(raw[idx])
+    return d.isoformat() if d else (_norm(raw[idx]) or None)
 
 
 def _parse_row(rec: dict, raw: list, cols: dict, ref: date, cutoff: date) -> dict:
@@ -261,6 +332,11 @@ def _parse_row(rec: dict, raw: list, cols: dict, ref: date, cutoff: date) -> dic
         body = comments[m.end():]
 
     names, doc, other_docs = _split_vessels(rec.get("vessel_block", ""))
+    obill_refs = ""
+    if rec.get("obill"):
+        tokens = [t for t in re.split(r"[,\s]+", rec["obill"]) if t]
+        if tokens:
+            doc, obill_refs = tokens[0], ", ".join(tokens[1:])
     # LCL is tracked with Vanguard on the house bill, so prefer it over the carrier's B/L
     cargo = _cargo_type(rec.get("order_booking_file", ""), comments, [doc, *other_docs])
     if cargo == "LCL":
@@ -328,11 +404,22 @@ def _parse_row(rec: dict, raw: list, cols: dict, ref: date, cutoff: date) -> dic
     if not reason and last_update < cutoff:
         reason = f"No update since {last_update.strftime('%d.%m')}"
 
-    # Keep the sentences the system won't write itself (e.g. "H/bill released by supplier.")
-    rest = ETD_RE.sub(" ", SOB_RE.sub(" ", body))
-    rest = re.sub(r"\(?\s*\d\s*(st|nd|rd|th)?\s*vessel\s*\)?\.?", " ", rest, flags=re.I)
-    sentences = [s.strip(" .") + "." for s in re.split(r"(?<=\.)\s+", rest) if s.strip(" .")]
-    note = " ".join(" ".join(s.split()) for s in sentences if not AUTO_SENTENCE.search(s))
+    # Keep the sentences the system won't write itself (e.g. "H/bill released by supplier."):
+    # those before the first status sentence lead the comment ("BVB/Country. Copy Docs
+    # received."), the rest follow it.
+    lead_parts: list[str] = []
+    note_parts: list[str] = []
+    seen_auto = False
+    for sent in re.split(r"(?<=\.)\s+", body):
+        sent = " ".join(sent.split())
+        if not sent.strip(" ."):
+            continue
+        if AUTO_SENTENCE.search(sent) or SOB_RE.search(sent) or ETD_RE.search(sent):
+            seen_auto = True
+            continue
+        (note_parts if seen_auto else lead_parts).append(sent if sent.endswith(".") else sent + ".")
+    lead = " ".join(lead_parts)
+    note = " ".join(note_parts)
 
     order = rec.get("order_booking_file", "")
     second = legs[1] if len(legs) > 1 else None
@@ -360,6 +447,14 @@ def _parse_row(rec: dict, raw: list, cols: dict, ref: date, cutoff: date) -> dic
         "expected_freight_rate": rec.get("expected_freight_rate") or None,
         "hbill_released": hbill,
         "comment_note": note,
+        "comment_lead": lead,
+        "end_client": rec.get("end_client") or None,
+        "handover_party": rec.get("handover_party") or None,
+        "fcl_count": rec.get("fcl_count") or None,
+        "obill_refs": obill_refs or None,
+        "doc_draft_bills": _date_cell(raw, cols, "doc_draft_bills"),
+        "doc_copy_invoices": _date_cell(raw, cols, "doc_copy_invoices"),
+        "doc_original_invoices": _date_cell(raw, cols, "doc_original_invoices"),
         "original_comment": comments,
         "other_docs": other_docs,
         "last_update": last_update.isoformat(),
