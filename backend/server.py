@@ -451,7 +451,7 @@ def _regenerate_comment(ship: dict) -> str:
     """Build the shipment comment from state.
     Format:
       - Single vessel:  '{today} - Planned ETD X. Awaiting confirmation of departure.'
-      - Multiple legs:  '{today} - 1st Planned ETD X. 2nd Planned ETD Y. Awaiting confirmation of departure.'
+      - Multiple legs:  '{today} - SOB X (1st Vessel). Planned ETD Y (2nd Vessel). Awaiting confirmation of departure of 2nd Vessel.'
       - When a vessel sails, 'Planned ETD X' becomes 'SOB X'.
       - Awaiting clause depends on how far the shipment has progressed and cargo_type.
     """
@@ -473,7 +473,8 @@ def _regenerate_comment(ship: dict) -> str:
     all_sailed = True
 
     for leg in legs:
-        label = f"{_ordinal(leg['index'])} " if multi else ""
+        # Transhipments name the leg after each date, e.g. "SOB 13.10 (1st Vessel)."
+        tag = f" ({_ordinal(leg['index'])} Vessel)" if multi else ""
         sailed = bool(leg["sob_date"])
         if not sailed:
             all_sailed = False
@@ -484,20 +485,20 @@ def _regenerate_comment(ship: dict) -> str:
             except Exception:
                 pass
         if sailed:
-            parts.append(f"{label}SOB {_plain_dd_mm(leg['sob_date'])}.")
+            parts.append(f"SOB {_plain_dd_mm(leg['sob_date'])}{tag}.")
         elif leg["index"] == 1 and (leg.get("etd_tba") or etd_overdue):
             # A lapsed ETD never gets shown as-is — the client should never see a date
             # that's already in the past. Falls back to TBA until a new date is set.
-            parts.append(f"{label}ETD TBA.")
+            parts.append(f"ETD TBA{tag}.")
         elif leg.get("planned_etd"):
             etd_txt = _plain_dd_mm(leg["planned_etd"])
             if leg["state"] == "delayed":
                 slightly = " slightly" if (leg.get("delay_days") or 0) <= 5 else ""
-                parts.append(f"{label}Vessel delayed{slightly}. Now planned ETD {etd_txt}.")
+                parts.append(f"Vessel delayed{slightly}. Now planned ETD {etd_txt}{tag}.")
             elif leg["state"] == "changed":
-                parts.append(f"{label}Vessel changed by S/Line. Now planned ETD {etd_txt}.")
+                parts.append(f"Vessel changed by S/Line. Now planned ETD {etd_txt}{tag}.")
             else:
-                parts.append(f"{label}Planned ETD {etd_txt}.")
+                parts.append(f"Planned ETD {etd_txt}{tag}.")
 
     # Awaiting clause — skipped when ops wrote their own "Awaiting ..." note
     is_lcl = (ship.get("cargo_type") or "FCL").upper() == "LCL"
@@ -507,7 +508,8 @@ def _regenerate_comment(ship: dict) -> str:
     elif all_sailed:
         parts.append("Awaiting SOB's." if is_lcl else "Awaiting ANF.")
     elif legs[0]["sob_date"] and multi:
-        parts.append("Awaiting confirmation of departure of next vessel.")
+        waiting = next((l for l in legs if not l["sob_date"]), legs[-1])
+        parts.append(f"Awaiting confirmation of departure of {_ordinal(waiting['index'])} Vessel.")
     else:
         parts.append("Awaiting confirmation of departure.")
 
