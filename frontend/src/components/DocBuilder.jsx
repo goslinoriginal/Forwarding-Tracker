@@ -283,8 +283,14 @@ export default function DocBuilder({ initial, onClose }) {
     if (!rows.length) return null;
     return { g, label: `Total ${label.toLowerCase()}`, rows, sub: fmt(rows.reduce((a, l) => a + l.zar, 0)), vat: fmt(rows.reduce((a, l) => a + l.vatAmt, 0)) };
   }).filter(Boolean);
-  const party = [[isQ ? "To" : "Client", client.name || "—"], ["Attention", dc.att], ["Date", dmy(dc.date)], [isQ ? "Valid until" : "Payment due", dmy(dc.until)], ["Ref no", dc.ref], ["File", dc.file], ["Prepared by", dc.prep], ["Email", clientEmailLabel(client)]].filter((p) => p[1]);
-  const shipInfo = [["Containers", dc.equipment], ["Total weight", dc.kgs && `${dc.kgs} KGS`], ["Total volume", dc.cbm && `${dc.cbm} CBM`], ["B/L no.", dc.bl], ["Commodity", dc.commodity], ["ETD / POL", dc.pol], ["ETA / POD", dc.pod], ["Via", dc.via], ["Transit time", dc.transit], ["Vessel", dc.vessel], ["SOB date", dmy(dc.sob)], ["ETA", dmy(dc.eta)], ["Frequency", dc.freq], ["Terms", dc.inco], ["R.O.E.", `USD ${roeTxt(c.roe.USD)}${usesEur ? ` · EUR ${roeTxt(c.roe.EUR)}` : ""}`]].filter((p) => p[1]);
+  // The pro forma is a freight statement: no email, payment due or terms on it
+  const party = [[isQ ? "To" : "Client", client.name || "—"], ["Attention", dc.att], ["Date", dmy(dc.date)], isQ && ["Valid until", dmy(dc.until)], ["Ref no", dc.ref], ["File", dc.file], ["Prepared by", dc.prep], isQ && ["Email", clientEmailLabel(client)]].filter((p) => p && p[1]);
+  const shipInfo = [["Containers", dc.equipment], ["Total weight", dc.kgs && `${dc.kgs} KGS`], ["Total volume", dc.cbm && `${dc.cbm} CBM`], ["B/L no.", dc.bl], ["Commodity", dc.commodity], ["ETD / POL", dc.pol], ["ETA / POD", dc.pod], ["Via", dc.via], ["Transit time", dc.transit], ["Vessel", dc.vessel], ["SOB date", dmy(dc.sob)], ["ETA", dmy(dc.eta)], ["Frequency", dc.freq], ["Terms", dc.inco]].filter((p) => p[1]);
+  // ROE comparison: SOB date vs today, the higher one, then the markup (foreign amounts only)
+  const markupPct = num(dc.markup);
+  const roeCols = [["USD", dc.usdSob, dc.usdToday, c.roe.USD], ["EUR", dc.eurSob, dc.eurToday, c.roe.EUR]]
+    .filter(([cur]) => live.some((l) => l.cur === cur && l.basis !== "pct"))
+    .map(([cur, sob, today, used]) => ({ cur, sob: num(sob), today: num(today), high: Math.max(num(sob), num(today)), used }));
   // EasyClear wants these five, in this order
   const ecShip = [
     ["Vessel", (dc.vessel || "").split(" / ").pop().trim().toUpperCase()],
@@ -342,7 +348,7 @@ export default function DocBuilder({ initial, onClose }) {
               </F>
               <F label="Doc #"><input className="oo-input b" value={dc.no} onChange={on("no")} /></F>
               <F label="Date"><input type="date" className="oo-input b" value={dc.date} onChange={on("date")} /></F>
-              <F label={isQ ? "Valid until" : "Payment due"}><input type="date" className="oo-input b" value={dc.until} onChange={on("until")} /></F>
+              {isQ && <F label="Valid until"><input type="date" className="oo-input b" value={dc.until} onChange={on("until")} /></F>}
               <F label="Rate sheet">
                 <select className="oo-input b" value={dc.tpl} onChange={(e) => setTpl(e.target.value)}>
                   {Object.keys(TPL).map((k) => <option key={k} value={k}>{TPL[k].label}</option>)}
@@ -404,7 +410,7 @@ export default function DocBuilder({ initial, onClose }) {
           <section className="oo-sec">
             <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
               <h3>Rates of exchange</h3>
-              <span style={{ fontSize: 12, color: "var(--mute)" }}>The higher of SOB-date and today’s ROE is used, plus the markup. Filled from the daily rates you capture.</span>
+              <span style={{ fontSize: 12, color: "var(--mute)" }}>The higher of SOB-date and today’s ROE is used, plus the markup — which only affects foreign-currency (USD/EUR) charges. Filled from the daily rates you capture.</span>
             </div>
             {[["SOB date", dc.sob, "usdSob", "eurSob"], ["Invoice date", dc.date, "usdToday", "eurToday"]].filter(([, iso]) => iso).map(([label, iso, uk, ek]) => {
               const day = roeDay(iso);
@@ -486,8 +492,8 @@ export default function DocBuilder({ initial, onClose }) {
           </section>
 
           <section className="oo-sec">
-            <h3>Terms &amp; status</h3>
-            <textarea className="oo-input b" rows={6} style={{ resize: "vertical" }} value={dc.notes} onChange={on("notes")} placeholder="Terms and conditions…" />
+            <h3>{isQ ? <>Terms &amp; status</> : "Status"}</h3>
+            {isQ && <textarea className="oo-input b" rows={6} style={{ resize: "vertical" }} value={dc.notes} onChange={on("notes")} placeholder="Terms and conditions…" />}
             <div className="oo-field">
               <span>Status</span>
               <Seg value={dc.status} onChange={(v) => setD({ status: v })} options={(isQ ? ["Draft", "Sent", "Accepted"] : ["Draft", "Sent", "Paid"]).map((s) => ({ value: s, label: s }))} />
@@ -573,6 +579,20 @@ export default function DocBuilder({ initial, onClose }) {
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: "10px 16px", padding: "12px 14px", borderRadius: 6, background: "#f3f5f9" }}>
                   {shipInfo.map(([k, v]) => <div key={k} className="kv"><span className="k">{k}</span><span style={{ fontWeight: 500 }}>{v}</span></div>)}
                 </div>
+                {roeCols.length > 0 && (
+                  <div className="oo-roe-cmp" style={{ gridTemplateColumns: `minmax(0,1fr) repeat(${roeCols.length}, 90px)` }} data-testid="roe-compare">
+                    <span className="k" style={{ gridColumn: "1 / -1" }}>Rate of exchange</span>
+                    <span />
+                    {roeCols.map((r) => <span key={r.cur} className="r k">{r.cur}</span>)}
+                    <span>SOB date{dc.sob ? ` (${dmy(roeDay(dc.sob))})` : ""}</span>
+                    {roeCols.map((r) => <span key={r.cur} className={`mono r ${r.sob && r.sob >= r.today ? "hi" : ""}`}>{r.sob ? r.sob.toFixed(4) : "—"}</span>)}
+                    <span>Today ({dmy(dc.date)})</span>
+                    {roeCols.map((r) => <span key={r.cur} className={`mono r ${r.today && r.today > r.sob ? "hi" : ""}`}>{r.today ? r.today.toFixed(4) : "—"}</span>)}
+                    <span>Higher of the two + {markupPct}%</span>
+                    {roeCols.map((r) => <span key={r.cur} className="mono r" style={{ fontWeight: 700 }}>{r.used ? r.used.toFixed(4) : "—"}</span>)}
+                    <span style={{ gridColumn: "1 / -1", fontSize: 9, color: "#6b7385" }}>The {markupPct}% applies to the rate of exchange only, so only to foreign-currency amounts.</span>
+                  </div>
+                )}
                 <div style={{ display: "flex", flexDirection: "column" }}>
                   <div className="lines" style={{ padding: "0 0 7px", borderBottom: "1.5px solid #1c2333", fontSize: 9, letterSpacing: ".06em", textTransform: "uppercase", color: "#6b7385" }}>
                     <span>Description</span><span>Cur</span><span className="r">Rate</span><span className="r">Units</span><span className="r">R.O.E.</span><span className="r">Total ZAR</span><span className="r">VAT</span>
@@ -605,7 +625,7 @@ export default function DocBuilder({ initial, onClose }) {
                     <span className="mono r" style={{ fontSize: 13, fontWeight: 700, paddingTop: 6, borderTop: "1.5px solid #1c2333" }}>{money("ZAR", c.total)}</span>
                   </div>
                 </div>
-                {(dc.notes || "").trim() && (
+                {isQ && (dc.notes || "").trim() && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 4, paddingTop: 12, borderTop: "1px solid #e6e9f0" }}>
                     <span className="k">Terms and conditions</span>
                     <span style={{ whiteSpace: "pre-wrap", fontSize: 10 }}>{dc.notes}</span>
