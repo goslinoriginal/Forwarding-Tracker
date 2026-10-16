@@ -5,6 +5,7 @@ publish = "build"
 
 [build.environment]
 CI = "false"
+NODE_VERSION = "20"
 
 # Single-page app: every path (e.g. /clients/123 after a refresh) loads index.html
 [[redirects]]
