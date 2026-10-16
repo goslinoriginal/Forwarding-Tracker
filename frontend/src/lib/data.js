@@ -48,10 +48,10 @@ async function saveDownload(path, name) {
   a.remove();
   URL.revokeObjectURL(url);
 }
-/** One PRO-FORMA CREDIT NOTE (two copies, two pages), dated today. */
-export const downloadCreditNote = (n) => saveDownload(`/credit-notes/${n.id}/xlsx?date=${todayIso()}`, `Pro-forma Credit Note ${n.file}.xlsx`);
-/** A printed CREDIT NOTE REQUEST list. */
-export const downloadCreditList = (l) => saveDownload(`/credit-lists/${l.id}/xlsx`, `Credit Note Request - Forwarding ${l.date} (${l.no}).xlsx`);
+/** One PRO-FORMA CREDIT NOTE (two copies, two pages), dated today — PDF to print, or Excel. */
+export const downloadCreditNote = (n, fmt = "pdf") => saveDownload(`/credit-notes/${n.id}/${fmt}?date=${todayIso()}`, `Pro-forma Credit Note ${n.file}.${fmt}`);
+/** A printed CREDIT NOTE REQUEST list — PDF to print, or Excel. */
+export const downloadCreditList = (l, fmt = "pdf") => saveDownload(`/credit-lists/${l.id}/${fmt}`, `Credit Note Request - Forwarding ${l.date} (${l.no}).${fmt}`);
 
 export const useVessels = () =>
   useQuery({ queryKey: ["vessels"], queryFn: async () => (await api.get("/vessels")).data.vessels || [] });

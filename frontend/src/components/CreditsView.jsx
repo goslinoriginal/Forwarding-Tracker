@@ -10,7 +10,7 @@ import { Modal, dmy, todayIso, useToast } from "@/lib/ui";
    the open CREDIT NOTE REQUEST list. Printing the list closes that batch. */
 
 const COLS = "minmax(150px,1.3fr) 84px 96px 92px 70px 124px 96px";
-const LIST_COLS = "84px 110px 110px minmax(120px,1fr) 124px 190px";
+const LIST_COLS = "84px 110px 110px minmax(120px,1fr) 124px 240px";
 
 const daysTo = (iso) => {
   if (!iso) return null;
@@ -27,6 +27,7 @@ export default function CreditsView({ docs, clients, ships, onOpenDoc }) {
   const { data: lists = [] } = useCreditLists();
   const [crediting, setCrediting] = useState(null);
   const [printing, setPrinting] = useState(false);
+  const [q, setQ] = useState("");
 
   const nameOf = (id) => clients.find((c) => c.id === id)?.name || "—";
   const shipFor = (d) => ships.find((s) => s.file_number === d.file && s.client_id === d.clientId) || ships.find((s) => d.file && s.file_number === d.file);
@@ -38,12 +39,14 @@ export default function CreditsView({ docs, clients, ships, onOpenDoc }) {
   }).sort((a, b) => (a.eta || "9999").localeCompare(b.eta || "9999")), [docs, ships]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const total = rows.reduce((a, r) => a + r.amount, 0);
+  const needle = q.trim().toLowerCase();
+  const shown = needle ? rows.filter(({ d }) => [d.file, d.no, nameOf(d.clientId)].join(" ").toLowerCase().includes(needle)) : rows;
   const arrived = rows.filter((r) => r.days !== null && r.days <= 0);
   const open = notes.filter((n) => !n.listId).slice().reverse(); // oldest first, like the list prints
   const openTotal = open.reduce((a, n) => a + n.amount, 0);
   const reload = () => refresh("documents", "credit-notes", "credit-lists");
 
-  const download = async (fn, x) => { try { await fn(x); } catch { toast("Download failed", { error: true }); } };
+  const download = async (fn, x, fmt) => { try { await fn(x, fmt); } catch { toast("Download failed", { error: true }); } };
   const undo = async (n) => {
     if (!window.confirm(`Undo the credit note for file ${n.file}? It goes back to Awaiting credit.`)) return;
     try { await api.delete(`/credit-notes/${n.id}`); await reload(); toast(`File ${n.file} back to Awaiting credit`); } catch (e) { toast(e?.response?.data?.detail || "Couldn't undo", { error: true }); }
@@ -79,17 +82,18 @@ export default function CreditsView({ docs, clients, ships, onOpenDoc }) {
       </div>
 
       <div className="oo-card scroll">
-        <div className="oo-card-head">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "20px 24px 12px", flexWrap: "wrap" }}>
           <div className="oo-card-title">
             <h2 className="oo-h2">Awaiting credit</h2>
             <span className="oo-sub">Clearfreight freight statements marked Accepted. Once the client has been invoiced, click Credit, type the two invoice numbers, and print the credit note (2 copies).</span>
           </div>
+          <input className="oo-search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search file #, client, pro forma…" data-testid="await-search" />
         </div>
         <div style={{ minWidth: 820 }}>
           <div className="oo-grid-head" style={{ gridTemplateColumns: COLS }}>
             <span>Client</span><span>File #</span><span>Pro forma</span><span>ETA</span><span className="r">Days</span><span className="r">Amount</span><span />
           </div>
-          {rows.map(({ d, eta, days, amount, archived }, i) => (
+          {shown.map(({ d, eta, days, amount, archived }, i) => (
             <div key={d.id} className="oo-grid-row" style={{ gridTemplateColumns: COLS, fontSize: 14, animationDelay: `${Math.min(i, 12) * 30}ms` }} data-testid={`await-${d.file}`}>
               <span className="oo-ellipsis" style={{ fontWeight: 600 }}>{nameOf(d.clientId)}</span>
               <span className="mono" style={{ fontSize: 13 }}>{d.file || "—"}</span>
@@ -102,11 +106,14 @@ export default function CreditsView({ docs, clients, ships, onOpenDoc }) {
               <button type="button" className="oo-btn primary sm" style={{ justifySelf: "end" }} onClick={() => setCrediting({ d, amount })} data-testid={`credit-${d.file}`}>Credit</button>
             </div>
           ))}
-          {rows.length > 0 && (
+          {shown.length > 0 && (
             <div className="oo-grid-row" style={{ gridTemplateColumns: COLS, fontSize: 14, fontWeight: 600, background: "var(--sub)" }}>
-              <span>Total · {plural(rows.length, "file")}</span><span /><span /><span /><span />
-              <span className="mono r">{money("ZAR", total)}</span><span />
+              <span>{needle ? `Matching · ${plural(shown.length, "file")} of ${rows.length}` : `Total · ${plural(rows.length, "file")}`}</span><span /><span /><span /><span />
+              <span className="mono r">{money("ZAR", shown.reduce((a, r) => a + r.amount, 0))}</span><span />
             </div>
+          )}
+          {needle && !shown.length && rows.length > 0 && (
+            <div className="oo-empty"><b>No file matches “{q.trim()}”</b><span className="oo-sub">It may already be credited, or not marked Accepted yet.</span></div>
           )}
           {!rows.length && (
             <div className="oo-empty">
@@ -140,7 +147,8 @@ export default function CreditsView({ docs, clients, ships, onOpenDoc }) {
                 <span className="oo-ellipsis" style={{ color: "var(--ink2)" }}>{nameOf(n.clientId)} · {n.docNo}</span>
                 <span className="mono r" style={{ fontWeight: 600 }}>{money("ZAR", n.amount)}</span>
                 <span style={{ display: "flex", gap: 12, justifyContent: "flex-end", alignItems: "center" }}>
-                  <button type="button" className="oo-link" onClick={() => download(downloadCreditNote, n)}>Credit note again</button>
+                  <button type="button" className="oo-link" onClick={() => download(downloadCreditNote, n, "pdf")}>Credit note PDF</button>
+                  <button type="button" className="oo-link" style={{ color: "var(--mute)" }} onClick={() => download(downloadCreditNote, n, "xlsx")}>Excel</button>
                   <button type="button" className="oo-link" style={{ color: "var(--red-fg)" }} onClick={() => undo(n)}>Undo</button>
                 </span>
               </div>
@@ -166,7 +174,8 @@ export default function CreditsView({ docs, clients, ships, onOpenDoc }) {
               </div>
               <span style={{ flex: 1, fontSize: 13, color: "var(--ink2)", minWidth: 200 }}>{l.notes.map((n) => n.file).join(", ")}</span>
               <span className="mono" style={{ fontWeight: 600 }}>{money("ZAR", l.total)}</span>
-              <button type="button" className="oo-btn sm" onClick={() => download(downloadCreditList, l)}>Download list</button>
+              <button type="button" className="oo-btn sm" onClick={() => download(downloadCreditList, l, "pdf")}>List PDF</button>
+              <button type="button" className="oo-link" style={{ color: "var(--mute)" }} onClick={() => download(downloadCreditList, l, "xlsx")}>Excel</button>
             </div>
           ))}
         </div>

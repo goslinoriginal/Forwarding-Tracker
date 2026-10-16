@@ -2405,6 +2405,7 @@ async def delete_document(doc_id: str):
 # printed, which closes the batch. Both are written into the forwarding team's own
 # credit note workbook (see credit_notes.py).
 from credit_notes import build_list_workbook, build_note_workbook  # noqa: E402
+from xlsx_pdf import workbook_pdf  # noqa: E402
 
 SIX_DIGITS = re.compile(r"\d{6}")
 
@@ -2480,13 +2481,28 @@ async def delete_credit_note(note_id: str):
     return {"ok": True}
 
 
-@api_router.get("/credit-notes/{note_id}/xlsx")
-async def credit_note_xlsx(note_id: str, date: Optional[str] = None):
+def _pdf_response(data: bytes, name: str) -> StreamingResponse:
+    return StreamingResponse(io.BytesIO(data), media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+async def _note_workbook(note_id: str, day_iso: Optional[str]):
     note = await db.credit_notes.find_one({"id": note_id}, _proj())
     if not note:
         raise HTTPException(status_code=404, detail="Credit note not found")
-    day = _day(date) if date else datetime.now(timezone.utc).date()  # always printed with the day's date
-    return _xlsx_response(build_note_workbook(day, note), f"Pro-forma Credit Note {note['file']}.xlsx")
+    day = _day(day_iso) if day_iso else datetime.now(timezone.utc).date()  # always printed with the day's date
+    return note, build_note_workbook(day, note)
+
+
+@api_router.get("/credit-notes/{note_id}/xlsx")
+async def credit_note_xlsx(note_id: str, date: Optional[str] = None):
+    note, xlsx = await _note_workbook(note_id, date)
+    return _xlsx_response(xlsx, f"Pro-forma Credit Note {note['file']}.xlsx")
+
+
+@api_router.get("/credit-notes/{note_id}/pdf")
+async def credit_note_pdf(note_id: str, date: Optional[str] = None):
+    note, xlsx = await _note_workbook(note_id, date)
+    return _pdf_response(workbook_pdf(xlsx), f"Pro-forma Credit Note {note['file']}.pdf")
 
 
 async def _next_list_no() -> str:
@@ -2518,12 +2534,23 @@ async def close_credit_list(payload: CreditListPayload):
     return lst
 
 
-@api_router.get("/credit-lists/{list_id}/xlsx")
-async def credit_list_xlsx(list_id: str):
+async def _list_workbook(list_id: str):
     lst = await db.credit_lists.find_one({"id": list_id}, _proj())
     if not lst:
         raise HTTPException(status_code=404, detail="List not found")
-    return _xlsx_response(build_list_workbook(_day(lst["date"]), lst["notes"]), f"Credit Note Request - Forwarding {lst['date']} ({lst['no']}).xlsx")
+    return lst, build_list_workbook(_day(lst["date"]), lst["notes"])
+
+
+@api_router.get("/credit-lists/{list_id}/xlsx")
+async def credit_list_xlsx(list_id: str):
+    lst, xlsx = await _list_workbook(list_id)
+    return _xlsx_response(xlsx, f"Credit Note Request - Forwarding {lst['date']} ({lst['no']}).xlsx")
+
+
+@api_router.get("/credit-lists/{list_id}/pdf")
+async def credit_list_pdf(list_id: str):
+    lst, xlsx = await _list_workbook(list_id)
+    return _pdf_response(workbook_pdf(xlsx), f"Credit Note Request - Forwarding {lst['date']} ({lst['no']}).pdf")
 
 
 import base64  # noqa: E402
