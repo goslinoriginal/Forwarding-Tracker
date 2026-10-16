@@ -162,23 +162,26 @@ export default function CreditsView({ docs, clients, ships, onOpenDoc }) {
   );
 }
 
-/* Only the invoice numbers need typing — everything else comes from the pro forma. */
+/* Only the two 6-digit invoice numbers are typed. The amount is the freight statement's
+   total; account, client name, code, description and VAT (none) never change. */
+const SIX = /^\d{6}$/;
+
 function CreditModal({ rows, nameOf, onClose, onDone }) {
   const toast = useToast();
-  const [f, setF] = useState(() => Object.fromEntries(rows.map(({ d, amount }) => [d.id, { amount: amount.toFixed(2), fs: d.fsInvoice || "", client: d.clientInvoice || "" }])));
+  const [f, setF] = useState(() => Object.fromEntries(rows.map(({ d }) => [d.id, { fs: d.fsInvoice || "", client: d.clientInvoice || "" }])));
   const [busy, setBusy] = useState(false);
-  const set = (id, k) => (e) => setF({ ...f, [id]: { ...f[id], [k]: e.target.value } });
-  const missing = rows.filter(({ d }) => !f[d.id].fs.trim() || !f[d.id].client.trim()).length;
-  const total = rows.reduce((a, { d }) => a + (parseFloat(f[d.id].amount) || 0), 0);
+  const set = (id, k) => (e) => setF({ ...f, [id]: { ...f[id], [k]: e.target.value.replace(/\D/g, "").slice(0, 6) } });
+  const missing = rows.filter(({ d }) => !SIX.test(f[d.id].fs) || !SIX.test(f[d.id].client)).length;
+  const total = rows.reduce((a, { amount }) => a + amount, 0);
   const G = "84px minmax(110px,1fr) 120px 130px 130px";
 
   const create = async () => {
-    if (missing) { toast("Fill in both invoice numbers for every file", { error: true }); return; }
+    if (missing) { toast("Both invoice numbers need 6 digits for every file", { error: true }); return; }
     setBusy(true);
     try {
       const { data } = await api.post("/credit-requests", {
         date: todayIso(),
-        notes: rows.map(({ d }) => ({ docId: d.id, amount: parseFloat(f[d.id].amount) || 0, fs_invoice: f[d.id].fs.trim(), client_invoice: f[d.id].client.trim() })),
+        notes: rows.map(({ d, amount }) => ({ docId: d.id, amount, fs_invoice: f[d.id].fs, client_invoice: f[d.id].client })),
       });
       onDone(data);
     } catch (e) {
@@ -192,25 +195,27 @@ function CreditModal({ rows, nameOf, onClose, onDone }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         <h2>Request credit notes</h2>
         <span style={{ fontSize: 14, color: "var(--mute)" }}>
-          Account 5613 · FREIGHT STATEMENT · 30050 FORWARDING. Type the freight statement's invoice Nº and the client invoice it was recovered on.
+          Only the two invoice numbers are needed. Account 5613 · FREIGHT STATEMENT · 30050 FORWARDING · no VAT — the amount is the freight statement's total.
         </span>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: "55vh", overflowY: "auto" }}>
         <div className="oo-grid-head" style={{ gridTemplateColumns: G, padding: "8px 4px", borderRadius: 8 }}>
           <span>File #</span><span>Client</span><span className="r">Amount</span><span>Invoice Nº to be credited</span><span>Recovered on invoice</span>
         </div>
-        {rows.map(({ d }) => (
+        {rows.map(({ d, amount }) => (
           <div key={d.id} style={{ display: "grid", gridTemplateColumns: G, gap: 14, alignItems: "center", padding: "0 4px" }} data-testid={`cn-row-${d.file}`}>
             <span className="mono" style={{ fontWeight: 600 }}>{d.file || "—"}</span>
             <span className="oo-ellipsis" style={{ fontSize: 13, color: "var(--ink2)" }}>{nameOf(d.clientId)} · {d.no}</span>
-            <input className="oo-input mono" style={{ textAlign: "right" }} value={f[d.id].amount} onChange={set(d.id, "amount")} inputMode="decimal" />
-            <input className="oo-input mono" value={f[d.id].fs} onChange={set(d.id, "fs")} placeholder="e.g. 320890" data-testid="cn-fs" />
-            <input className="oo-input mono" value={f[d.id].client} onChange={set(d.id, "client")} placeholder="e.g. 321045" data-testid="cn-client" />
+            <span className="mono r" style={{ fontWeight: 600 }}>{money("ZAR", amount)}</span>
+            <input className="oo-input mono" value={f[d.id].fs} onChange={set(d.id, "fs")} placeholder="320890" inputMode="numeric" maxLength={6} data-testid="cn-fs"
+              style={{ borderColor: f[d.id].fs && !SIX.test(f[d.id].fs) ? "var(--amb-fg)" : undefined }} />
+            <input className="oo-input mono" value={f[d.id].client} onChange={set(d.id, "client")} placeholder="321045" inputMode="numeric" maxLength={6} data-testid="cn-client"
+              style={{ borderColor: f[d.id].client && !SIX.test(f[d.id].client) ? "var(--amb-fg)" : undefined }} />
           </div>
         ))}
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, fontSize: 14 }}>
-        <span style={{ color: missing ? "var(--amb-fg)" : "var(--ink2)" }}>{missing ? `${missing} file${missing === 1 ? "" : "s"} still need${missing === 1 ? "s" : ""} invoice numbers` : "Ready"}</span>
+        <span style={{ color: missing ? "var(--amb-fg)" : "var(--ink2)" }}>{missing ? `${missing} file${missing === 1 ? "" : "s"} still need${missing === 1 ? "s" : ""} both 6-digit invoice numbers` : "Ready"}</span>
         <b className="mono">Total {money("ZAR", total)}</b>
       </div>
       <div className="oo-modal-actions">

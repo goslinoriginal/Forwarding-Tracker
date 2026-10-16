@@ -2439,6 +2439,8 @@ async def create_credit_request(payload: CreditRequestPayload):
             raise HTTPException(status_code=404, detail="Pro forma not found")
         if doc.get("creditRequestId"):
             raise HTTPException(status_code=409, detail=f"{doc.get('no')} has already been credited")
+        if not (re.fullmatch(r"\d{6}", line.fs_invoice.strip()) and re.fullmatch(r"\d{6}", line.client_invoice.strip())):
+            raise HTTPException(status_code=400, detail=f"File {doc.get('file')}: both invoice numbers need 6 digits")
         notes.append({
             "docId": doc["id"], "docNo": doc.get("no", ""), "clientId": doc.get("clientId", ""),
             "file": doc.get("file", ""), "amount": round(line.amount, 2),

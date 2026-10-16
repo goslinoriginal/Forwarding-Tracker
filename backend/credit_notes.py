@@ -9,7 +9,7 @@ looks exactly like the workbook they fill in by hand.
 import copy
 import io
 import zipfile
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 
 from openpyxl import load_workbook
@@ -65,7 +65,13 @@ def _auto_rows(ws, rows) -> None:
 
 def _fill_note(ws, day: date, n: dict) -> None:
     amount = round(float(n.get("amount") or 0), 2)
-    ws["K2"] = datetime(day.year, day.month, day.day)
+    # "Updated On" and its date aren't shown on the credit note
+    ws["K1"] = None
+    ws["K2"] = None
+    # Room for the two-line labels ("File Nº to be / credited:", "Invoice Nº to be / credited:")
+    # and the "Information That the Accounts Department…" heading, in any font
+    for r, h in ((4, 42), (5, 42), (8, 38)):
+        ws.row_dimensions[r].height = h
     ws["B3"] = f"Date:         {day.strftime('%d/%m/%Y')}"
     ws["D5"] = _num(n.get("file"))
     ws["J5"] = _num(n.get("fs_invoice"))
