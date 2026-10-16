@@ -31,6 +31,23 @@ export const useSettings = () =>
 export const useDocuments = () =>
   useQuery({ queryKey: ["documents"], queryFn: async () => (await api.get("/documents")).data });
 
+export const useCreditRequests = () =>
+  useQuery({ queryKey: ["credit-requests"], queryFn: async () => (await api.get("/credit-requests")).data });
+
+/** Downloads a credit note request as the forwarding team's credit note workbook. */
+export async function downloadCreditRequest(req) {
+  const res = await fetch(`${API}/credit-requests/${req.id}/xlsx`);
+  if (!res.ok) throw new Error("Download failed");
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `Credit Note Request - Forwarding ${req.date} (${req.no}).xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 export const useVessels = () =>
   useQuery({ queryKey: ["vessels"], queryFn: async () => (await api.get("/vessels")).data.vessels || [] });
 

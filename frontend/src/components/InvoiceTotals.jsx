@@ -5,7 +5,7 @@ import { COMPANY_HUE, Seg, dmy } from "@/lib/ui";
 
 const ENT = [{ value: "", label: "All entities" }, { value: "Patuma", label: "Patuma" }, { value: "Clearfreight", label: "Clearfreight" }];
 const COLS = "minmax(140px,1.4fr) 36px repeat(6, minmax(100px,1fr)) 84px";
-const SORTS = { total: "Total", n: "Pro formas", revenue: "Revenue", Sent: "Outstanding", last: "Last" };
+const SORTS = { total: "Total", n: "Pro formas", revenue: "Revenue", Await: "Awaiting credit", last: "Last" };
 
 /** Invoicing totals: KPIs for a period, a 12-month chart and a per-client table. */
 export default function InvoiceTotals({ docs, clients, onShowClient }) {
@@ -25,7 +25,7 @@ export default function InvoiceTotals({ docs, clients, onShowClient }) {
     { k: "Invoiced", v: money("ZAR", all.total), sub: `${all.n} pro forma${all.n === 1 ? "" : "s"} · incl. VAT`, style: { background: "var(--accent-soft)", color: "var(--accent-ink)" } },
     { k: "Excl. VAT", v: money("ZAR", all.sub), sub: `Average ${money("ZAR", all.n ? all.total / all.n : 0)} per pro forma`, style: { background: "var(--sub)", border: "1px solid var(--line2)" } },
     { k: "Revenue (our fees)", v: money("ZAR", all.revenue), sub: "Agency & service fee lines, excl. VAT", style: { background: "var(--grn-bg)", color: "var(--grn-fg)" } },
-    { k: "Outstanding", v: money("ZAR", all.Sent), sub: `${all.nSent} sent, not yet paid`, style: { background: "var(--amb-bg)", color: "var(--amb-fg)" } },
+    { k: "Awaiting credit", v: money("ZAR", all.Await), sub: `${all.nAwait} Clearfreight freight statement${all.nAwait === 1 ? "" : "s"} accepted, not yet credited`, style: { background: "var(--amb-bg)", color: "var(--amb-fg)" } },
   ];
 
   return (
@@ -57,7 +57,7 @@ export default function InvoiceTotals({ docs, clients, onShowClient }) {
                 <span className="v mono">{m.total ? `${Math.round(m.total / 1000)}k` : ""}</span>
                 <div className="col">
                   <div style={{ height: `${(m.total / max) * 100}%`, animationDelay: `${i * 40}ms` }}>
-                    {m.Paid > 0 && <div className="paid" style={{ height: `${(m.Paid / m.total) * 100}%` }} />}
+                    {m.Credited > 0 && <div className="paid" style={{ height: `${(m.Credited / m.total) * 100}%` }} />}
                   </div>
                 </div>
                 <span className="k">{monthLabel(m.key, m.key.endsWith("-01") || i === 0)}</span>
@@ -66,7 +66,7 @@ export default function InvoiceTotals({ docs, clients, onShowClient }) {
           </div>
           <div style={{ display: "flex", gap: 16, fontSize: 12, color: "var(--mute)" }}>
             <span><i className="oo-swatch" style={{ background: "var(--accent)" }} /> Invoiced</span>
-            <span><i className="oo-swatch" style={{ background: "var(--grn-fg)" }} /> of which paid</span>
+            <span><i className="oo-swatch" style={{ background: "var(--grn-fg)" }} /> of which credited</span>
           </div>
         </div>
         <div className="oo-card pad">
@@ -100,7 +100,7 @@ export default function InvoiceTotals({ docs, clients, onShowClient }) {
         </div>
         <div style={{ minWidth: 980 }}>
           <div className="oo-grid-head" style={{ gridTemplateColumns: COLS }}>
-            <span>Client</span><span className="r">#</span><span className="r">Total incl. VAT</span><span className="r">Excl. VAT</span><span className="r">Revenue</span><span className="r">Draft</span><span className="r">Outstanding</span><span className="r">Paid</span><span className="r">Last</span>
+            <span>Client</span><span className="r">#</span><span className="r">Total incl. VAT</span><span className="r">Excl. VAT</span><span className="r">Revenue</span><span className="r">Draft</span><span className="r">Awaiting credit</span><span className="r">Credited</span><span className="r">Last</span>
           </div>
           {rows.map((t, i) => (
             <div key={t.id} className="oo-grid-row click" style={{ gridTemplateColumns: COLS, fontSize: 14, animationDelay: `${Math.min(i, 12) * 30}ms` }} onClick={() => onShowClient(t.name)}>
@@ -110,8 +110,8 @@ export default function InvoiceTotals({ docs, clients, onShowClient }) {
               <span className="mono r" style={{ color: "var(--ink2)" }}>{money("ZAR", t.sub)}</span>
               <span className="mono r" style={{ color: "var(--grn-fg)" }}>{money("ZAR", t.revenue)}</span>
               <span className="mono r" style={{ color: "var(--mute)" }}>{t.Draft ? money("ZAR", t.Draft) : "—"}</span>
-              <span className="mono r" style={{ color: t.Sent ? "var(--amb-fg)" : "var(--mute)" }}>{t.Sent ? money("ZAR", t.Sent) : "—"}</span>
-              <span className="mono r" style={{ color: "var(--ink2)" }}>{t.Paid ? money("ZAR", t.Paid) : "—"}</span>
+              <span className="mono r" style={{ color: t.Await ? "var(--amb-fg)" : "var(--mute)" }}>{t.Await ? money("ZAR", t.Await) : "—"}</span>
+              <span className="mono r" style={{ color: "var(--ink2)" }}>{t.Credited ? money("ZAR", t.Credited) : "—"}</span>
               <span className="mono r" style={{ fontSize: 12, color: "var(--ink2)" }}>{dmy(t.last)}</span>
             </div>
           ))}
@@ -123,8 +123,8 @@ export default function InvoiceTotals({ docs, clients, onShowClient }) {
               <span className="mono r">{money("ZAR", all.sub)}</span>
               <span className="mono r">{money("ZAR", all.revenue)}</span>
               <span className="mono r">{money("ZAR", all.Draft)}</span>
-              <span className="mono r">{money("ZAR", all.Sent)}</span>
-              <span className="mono r">{money("ZAR", all.Paid)}</span>
+              <span className="mono r">{money("ZAR", all.Await)}</span>
+              <span className="mono r">{money("ZAR", all.Credited)}</span>
               <span />
             </div>
           )}

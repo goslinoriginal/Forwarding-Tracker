@@ -106,7 +106,7 @@ function ShipmentFinder({ carrier: initCarrier = "", query: initQuery = "", onCl
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 14, maxHeight: "58vh", overflowY: "auto", margin: "0 -4px", padding: "0 4px" }}>
         {groups.map((g) => (
-          <div key={g.id} style={{ display: "flex", flexDirection: "column", border: "1px solid var(--line)", borderRadius: 14, overflow: "hidden" }}>
+          <div key={g.id} style={{ flex: "none", display: "flex", flexDirection: "column", border: "1px solid var(--line)", borderRadius: 14, overflow: "hidden" }}>
             <button
               type="button"
               onClick={() => { onClose(); navigate(`/clients/${g.id}`); }}

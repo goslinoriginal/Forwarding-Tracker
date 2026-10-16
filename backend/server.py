@@ -2394,6 +2394,97 @@ async def delete_document(doc_id: str):
 
 
 # ---------- Import old Excel status reports ----------
+# ---------- Pro-forma credit notes ----------
+# Clearfreight freight statements are credited once the shipment has been invoiced
+# to the client. A request credits a batch of accepted pro formas at once and is
+# written into the forwarding team's own credit note workbook (see credit_notes.py).
+from credit_notes import build_credit_workbook  # noqa: E402
+
+
+class CreditNoteLine(BaseModel):
+    docId: str
+    amount: float
+    fs_invoice: str  # the freight statement's invoice Nº (what gets credited)
+    client_invoice: str  # the client's invoice it was recovered on
+
+
+class CreditRequestPayload(BaseModel):
+    date: str  # YYYY-MM-DD (the office's local day)
+    notes: List[CreditNoteLine]
+
+
+async def _next_credit_no() -> str:
+    year = date.today().strftime("%y")
+    n = await db.credit_requests.count_documents({"no": {"$regex": f"^CR-{year}-"}})
+    return f"CR-{year}-{n + 1:03d}"
+
+
+@api_router.get("/credit-requests")
+async def list_credit_requests():
+    return await db.credit_requests.find({}, _proj()).sort("created_at", -1).to_list(500)
+
+
+@api_router.post("/credit-requests")
+async def create_credit_request(payload: CreditRequestPayload):
+    if not payload.notes:
+        raise HTTPException(status_code=400, detail="Choose at least one pro forma to credit")
+    try:
+        day = date.fromisoformat(payload.date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
+    notes = []
+    for line in payload.notes:
+        doc = await db.documents.find_one({"id": line.docId}, _proj())
+        if not doc or doc.get("type") != "pfi":
+            raise HTTPException(status_code=404, detail="Pro forma not found")
+        if doc.get("creditRequestId"):
+            raise HTTPException(status_code=409, detail=f"{doc.get('no')} has already been credited")
+        notes.append({
+            "docId": doc["id"], "docNo": doc.get("no", ""), "clientId": doc.get("clientId", ""),
+            "file": doc.get("file", ""), "amount": round(line.amount, 2),
+            "fs_invoice": line.fs_invoice.strip(), "client_invoice": line.client_invoice.strip(),
+        })
+    req = {
+        "id": str(uuid.uuid4()), "no": await _next_credit_no(), "date": day.isoformat(),
+        "notes": notes, "total": round(sum(n["amount"] for n in notes), 2), "created_at": _now_iso(),
+    }
+    await db.credit_requests.insert_one(dict(req))
+    for n in notes:
+        await db.documents.update_one({"id": n["docId"]}, {"$set": {
+            "status": "Credited", "creditRequestId": req["id"], "creditRequestNo": req["no"], "creditedOn": req["date"],
+            "fsInvoice": n["fs_invoice"], "clientInvoice": n["client_invoice"], "updated_at": _now_iso(),
+        }})
+    return req
+
+
+@api_router.delete("/credit-requests/{req_id}")
+async def delete_credit_request(req_id: str):
+    req = await db.credit_requests.find_one({"id": req_id}, _proj())
+    if not req:
+        raise HTTPException(status_code=404, detail="Credit request not found")
+    for n in req.get("notes", []):
+        await db.documents.update_one({"id": n["docId"], "creditRequestId": req_id}, {
+            "$set": {"status": "Accepted", "updated_at": _now_iso()},
+            "$unset": {"creditRequestId": "", "creditRequestNo": "", "creditedOn": ""},
+        })
+    await db.credit_requests.delete_one({"id": req_id})
+    return {"ok": True}
+
+
+@api_router.get("/credit-requests/{req_id}/xlsx")
+async def credit_request_xlsx(req_id: str):
+    req = await db.credit_requests.find_one({"id": req_id}, _proj())
+    if not req:
+        raise HTTPException(status_code=404, detail="Credit request not found")
+    data = build_credit_workbook(date.fromisoformat(req["date"]), req["notes"])
+    name = f"Credit Note Request - Forwarding {req['date']}.xlsx"
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
 import base64  # noqa: E402
 
 from report_import import parse_report  # noqa: E402

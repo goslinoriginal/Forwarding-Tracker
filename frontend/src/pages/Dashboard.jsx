@@ -223,8 +223,8 @@ function InvoicedCard({ docs, onOpen }) {
       <div style={{ display: "grid", gridTemplateColumns: "auto auto", gap: "5px 18px", fontSize: 13 }}>
         <span style={{ color: "var(--mute)" }}>Revenue (our fees)</span><span className="mono r" style={{ color: "var(--grn-fg)" }}>{money("ZAR", all.revenue)}</span>
         <span style={{ color: "var(--mute)" }}>Drafts</span><span className="mono r">{money("ZAR", all.Draft)}</span>
-        <span style={{ color: "var(--mute)" }}>Sent, not paid</span><span className="mono r" style={{ color: all.Sent ? "var(--amb-fg)" : undefined }}>{money("ZAR", all.Sent)}</span>
-        <span style={{ color: "var(--mute)" }}>Paid</span><span className="mono r">{money("ZAR", all.Paid)}</span>
+        <span style={{ color: "var(--mute)" }}>Awaiting credit</span><span className="mono r" style={{ color: all.Await ? "var(--amb-fg)" : undefined }}>{money("ZAR", all.Await)}</span>
+        <span style={{ color: "var(--mute)" }}>Credited</span><span className="mono r">{money("ZAR", all.Credited)}</span>
         <span className="oo-link" style={{ gridColumn: "1 / -1", justifySelf: "end", paddingTop: 4 }}>Totals per client →</span>
       </div>
     </div>

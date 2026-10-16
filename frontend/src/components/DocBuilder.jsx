@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { api } from "@/lib/api";
 import { clientEmail, clientEmailLabel, composeEmail, getMailApp, roeDay, roeFor, shipmentLegs, useClients, useDocuments, useRefresh, useRoe, useShipments } from "@/lib/data";
 import {
-  DEF_OF, ENTITIES, GROUPS, INCO, Ln, PFI_TERMS, QUOTE_TERMS, SYM, TPL, calc, dotDecimal, ecDesc, equipmentText, fmt, money, num, parseOrder,
+  DEF_OF, ENTITIES, GROUPS, INCO, Ln, PFI_TERMS, QUOTE_TERMS, SYM, TPL, calc, needsCredit, pfiStatus, dotDecimal, ecDesc, equipmentText, fmt, money, num, parseOrder,
 } from "@/lib/billingCalc";
 import { offReason } from "@/lib/holidays";
 import { Seg, copyText, dmy, docDate, isoPlusDays, useToast } from "@/lib/ui";
@@ -134,6 +134,7 @@ export default function DocBuilder({ initial, onClose }) {
   const on = (k) => (e) => setD({ [k]: e.target.value });
 
   const isQ = dc.type === "quote";
+  const credited = !isQ && pfiStatus(dc) === "Credited";
   const tl = isQ ? "Quote" : "Pro forma";
   const tpl = TPL[dc.tpl] || TPL.fcl;
   const c = calc(dc);
@@ -162,12 +163,12 @@ export default function DocBuilder({ initial, onClose }) {
   };
   const onSave = guard(async () => { const d = await save(); toast(`${tl} ${d.no} saved`); });
   const onSend = guard(async () => {
-    const d = await save({ status: dc.status === "Draft" ? "Sent" : dc.status });
+    const d = await save(isQ && dc.status === "Draft" ? { status: "Sent" } : undefined);
     const to = clientEmail(client);
     if (to) {
       await composeEmail({ to, cc: client.email_cc, subject: `${tl} ${d.no} – ${client.name}`, body: `Dear ${client.email_greeting || client.name},\n\nPlease find attached ${isQ ? "our quotation" : "the pro forma invoice"} ${d.no} (total ${money("ZAR", c.total)} incl. VAT).\n\nKind regards.` });
     }
-    toast(`${tl} ${d.no} marked sent${to ? ` · email opened — ${getMailApp() === "mailto" ? "Ctrl+V pastes the message above your signature, then " : ""}attach the PDF` : ""}`);
+    toast(`${tl} ${d.no} ${isQ ? "marked sent" : "saved"}${to ? ` · email opened — ${getMailApp() === "mailto" ? "Ctrl+V pastes the message above your signature, then " : ""}attach the PDF` : ""}`);
   });
   const onDownload = guard(async () => {
     const d = await save();
@@ -377,6 +378,7 @@ export default function DocBuilder({ initial, onClose }) {
               <F label="Client ref / PO"><input className="oo-input b" value={dc.ref} onChange={on("ref")} placeholder="e.g. ZN26152" /></F>
               <F label="Attention"><input className="oo-input b" value={dc.att} onChange={on("att")} placeholder="Contact name" /></F>
               <F label="Prepared by"><input className="oo-input b" value={dc.prep} onChange={on("prep")} placeholder="Your name" /></F>
+              {needsCredit(dc) && <F label="Invoice Nº (EasyClear)"><input className="oo-input b mono" value={dc.fsInvoice || ""} onChange={on("fsInvoice")} placeholder="e.g. 320890" title="The freight statement's invoice number — goes on the credit note" /></F>}
             </div>
             <div className="oo-field">
               <span>Issued by</span>
@@ -516,8 +518,24 @@ export default function DocBuilder({ initial, onClose }) {
             {isQ && <textarea className="oo-input b" rows={6} style={{ resize: "vertical" }} value={dc.notes} onChange={on("notes")} placeholder="Terms and conditions…" />}
             <div className="oo-field">
               <span>Status</span>
-              <Seg value={dc.status} onChange={(v) => setD({ status: v })} options={(isQ ? ["Draft", "Sent", "Accepted"] : ["Draft", "Sent", "Paid"]).map((s) => ({ value: s, label: s }))} />
+              {isQ ? (
+                <Seg value={dc.status} onChange={(v) => setD({ status: v })} options={["Draft", "Sent", "Accepted"].map((s) => ({ value: s, label: s }))} />
+              ) : credited ? (
+                <span className="oo-note" style={{ alignSelf: "flex-start" }}>
+                  <b>Credited</b>
+                  <span>On credit note request {dc.creditRequestNo}{dc.creditedOn ? ` · ${dmy(dc.creditedOn)}` : ""}{dc.clientInvoice ? ` · recovered on invoice ${dc.clientInvoice}` : ""}</span>
+                </span>
+              ) : (
+                <Seg value={pfiStatus(dc)} onChange={(v) => setD({ status: v })} options={["Draft", "Accepted"].map((s) => ({ value: s, label: s }))} />
+              )}
             </div>
+            {!isQ && !credited && (
+              <span style={{ fontSize: 12, color: "var(--mute)" }}>
+                {needsCredit(dc)
+                  ? "Mark it Accepted once it's final — it then waits under Awaiting credit until the client has been invoiced and you request the credit note."
+                  : "Patuma freight invoices aren't credited."}
+              </span>
+            )}
           </section>
         </div>
 
@@ -589,7 +607,7 @@ export default function DocBuilder({ initial, onClose }) {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16 }}>
                   <span style={{ fontSize: 15, fontWeight: 700, letterSpacing: "-.01em", color: `oklch(0.42 0.13 ${ent.h})` }}>{ent.label}</span>
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, textAlign: "right" }}>
-                    <span style={{ fontSize: 15, fontWeight: 700, letterSpacing: ".05em" }}>{isQ ? tpl.qTitle : tpl.pTitle}</span>
+                    <span style={{ fontSize: 15, fontWeight: 700, letterSpacing: ".05em" }}>{isQ ? tpl.qTitle : dc.entity === "Patuma" ? "FREIGHT INVOICE" : tpl.pTitle}</span>
                     <span className="mono" style={{ color: "#6b7385" }}>{dc.no}</span>
                   </div>
                 </div>

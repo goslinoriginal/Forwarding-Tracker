@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import InvoiceTotals from "@/components/InvoiceTotals";
+import CreditsView from "@/components/CreditsView";
 import { pinSort, useClients, useDocuments, useRefresh, useShipments } from "@/lib/data";
-import { calc, makeDoc, money } from "@/lib/billingCalc";
+import { awaitingCredit, calc, makeDoc, money, pfiStatus } from "@/lib/billingCalc";
 import { DOC_STATUS_HUE, DOC_TYPE_HUE, Modal, Pill, Seg, dmy, useToast } from "@/lib/ui";
 import DocBuilder, { fromShipment, nextDocNumber, pfiFromQuote } from "@/components/DocBuilder";
 import { api } from "@/lib/api";
@@ -20,8 +21,10 @@ export default function BillingPage() {
   const [open, setOpen] = useState(null);
   const [asking, setAsking] = useState(false);
   const [params, setParams] = useSearchParams();
-  const view = params.get("view") === "totals" ? "totals" : "docs";
-  const setView = (v) => setParams(v === "totals" ? { view: "totals" } : {}, { replace: true });
+  const view = ["totals", "credit"].includes(params.get("view")) ? params.get("view") : "docs";
+  const setView = (v) => setParams(v === "docs" ? {} : { view: v }, { replace: true });
+  const { data: ships = [] } = useShipments();
+  const nAwait = docs.filter(awaitingCredit).length;
 
   const nameOf = (id) => clients.find((c) => c.id === id)?.name;
   const q = search.trim().toLowerCase();
@@ -68,10 +71,12 @@ export default function BillingPage() {
       </div>
 
       <div style={{ display: "flex" }}>
-        <Seg size="lg" value={view} onChange={setView} options={[{ value: "docs", label: "Quotes & pro formas" }, { value: "totals", label: "Invoiced totals" }]} />
+        <Seg size="lg" value={view} onChange={setView} options={[{ value: "docs", label: "Quotes & pro formas" }, { value: "credit", label: "Awaiting credit", count: nAwait }, { value: "totals", label: "Invoiced totals" }]} />
       </div>
 
-      {view === "totals" ? (
+      {view === "credit" ? (
+        <CreditsView docs={docs} clients={clients} ships={ships} onOpenDoc={(d) => setOpen({ ...d, lines: (d.lines || []).map((l) => ({ ...l })) })} />
+      ) : view === "totals" ? (
         <InvoiceTotals docs={docs} clients={clients} onShowClient={(name) => { setFilter("Pro formas"); setSearch(name); setView("docs"); }} />
       ) : (<>
       <div className="oo-toolbar">
@@ -96,12 +101,12 @@ export default function BillingPage() {
                 <span className="mono" style={{ fontSize: 13, fontWeight: 500 }}>{d.no}</span>
                 {d.quoteNo && <span style={{ fontSize: 11, color: "var(--mute)" }}>from {d.quoteNo}</span>}
               </span>
-              <Pill hue={DOC_TYPE_HUE[d.type]}>{d.type === "quote" ? "Quote" : "Pro forma"}</Pill>
+              <Pill hue={DOC_TYPE_HUE[d.type]}>{d.type === "quote" ? "Quote" : d.entity === "Patuma" ? "Freight invoice" : "Freight statement"}</Pill>
               <span className="oo-ellipsis" style={{ color: "var(--ink2)", fontSize: 13 }}>{[d.pol, d.pod].filter(Boolean).join(" → ") || "—"}</span>
               <span className="mono" style={{ fontSize: 13, color: "var(--ink2)" }}>{d.file || "—"}</span>
               <span className="mono" style={{ fontSize: 13, color: "var(--ink2)" }}>{dmy(d.date) || "—"}</span>
               <span className="mono r" style={{ fontSize: 13, fontWeight: 500 }}>{money("ZAR", calc(d).total)}</span>
-              <Pill hue={DOC_STATUS_HUE[d.status]}>{d.status}</Pill>
+              <Pill hue={DOC_STATUS_HUE[d.type === "pfi" ? pfiStatus(d) : d.status]}>{d.type === "pfi" ? pfiStatus(d) : d.status}</Pill>
               <span className="oo-chev">›</span>
             </div>
           ))}

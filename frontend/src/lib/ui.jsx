@@ -20,7 +20,7 @@ export function useChip() {
 export const CARRIER_HUE = { MSC: 95, Maersk: 230, ONE: 350, COSCO: 255, "Hapag Lloyd": 50, PIL: 22, "CMA CGM": 268, Vanguard: 305, Other: 250 };
 export const STATUS_HUE = { Planned: null, Booked: 70, Shipped: 155, Delayed: 22, ANF: 300 };
 export const COMPANY_HUE = { Patuma: 240, Clearfreight: 200 };
-export const DOC_STATUS_HUE = { Draft: null, Sent: 240, Accepted: 155, Paid: 155 };
+export const DOC_STATUS_HUE = { Draft: null, Sent: 240, Accepted: 155, Paid: 155, Credited: 300 };
 export const DOC_TYPE_HUE = { quote: 200, pfi: 300 };
 export const CARGO_HUE = { LCL: 200, FCL: 255 };
 

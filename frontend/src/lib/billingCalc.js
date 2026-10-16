@@ -182,6 +182,18 @@ export function equipmentText(orderText, cargoType, fclCount) {
 /** "1571,34" → "1571.34" for EasyClear. */
 export const dotDecimal = (v) => String(v || "").trim().replace(/\s/g, "").replace(",", ".");
 
+/** A pro forma's status: Draft → Accepted (marked by you) → Credited (on a credit note request).
+ *  Older pro formas marked "Sent" or "Paid" count as Accepted. */
+export function pfiStatus(d) {
+  if (d.creditRequestId || d.status === "Credited") return "Credited";
+  return ["Accepted", "Sent", "Paid"].includes(d.status) ? "Accepted" : "Draft";
+}
+
+/** Clearfreight pro formas are freight statements and get credited once the client is
+ *  invoiced; Patuma ones are freight invoices and are never credited. */
+export const needsCredit = (d) => d.type === "pfi" && d.entity === "Clearfreight";
+export const awaitingCredit = (d) => needsCredit(d) && pfiStatus(d) === "Accepted";
+
 export function makeDoc(tpl, type, o) {
   return {
     id: null, type, tpl, no: "", clientId: "", entity: "Clearfreight",

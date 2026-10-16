@@ -1,5 +1,5 @@
 // Invoicing totals from the saved pro formas (drafts included).
-import { calc, r2 } from "@/lib/billingCalc";
+import { calc, needsCredit, pfiStatus, r2 } from "@/lib/billingCalc";
 
 const pad = (n) => String(n).padStart(2, "0");
 export const monthKey = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
@@ -32,9 +32,10 @@ export function docFigures(d) {
   return { total: c.total, sub: c.sub, vat: c.vat, revenue };
 }
 
-const blank = () => ({ n: 0, total: 0, sub: 0, revenue: 0, Draft: 0, Sent: 0, Paid: 0, nDraft: 0, nSent: 0, nPaid: 0, last: "" });
+const blank = () => ({ n: 0, total: 0, sub: 0, revenue: 0, Draft: 0, Accepted: 0, Credited: 0, Await: 0, nDraft: 0, nAccepted: 0, nCredited: 0, nAwait: 0, last: "" });
 function add(t, d, f) {
-  const st = ["Draft", "Sent", "Paid"].includes(d.status) ? d.status : "Draft";
+  const st = pfiStatus(d);
+  if (st === "Accepted" && needsCredit(d)) { t.Await = r2(t.Await + f.total); t.nAwait += 1; }
   t.n += 1;
   t.total = r2(t.total + f.total);
   t.sub = r2(t.sub + f.sub);
