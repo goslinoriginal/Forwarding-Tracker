@@ -358,7 +358,7 @@ textarea.oo-input { line-height: 1.5; resize: none; }
 .oo-handle { cursor: col-resize; display: flex; align-items: center; justify-content: center; background: var(--bg); border-left: 1px solid var(--line); transition: background 0.2s; }
 .oo-handle:hover { background: var(--accent-soft); }
 .oo-handle span { width: 4px; height: 44px; border-radius: 999px; background: var(--faint); }
-.oo-charge { display: grid; grid-template-columns: minmax(110px, 1fr) 60px 100px 88px 28px 96px 22px; gap: 6px; align-items: center; transition: opacity 0.2s; }
+.oo-charge { display: grid; grid-template-columns: minmax(110px, 1fr) 60px 100px 88px 28px var(--zar-w, 96px) 22px; gap: 6px; align-items: center; transition: opacity 0.2s; }
 .oo-charge select.oo-input { padding: 7px 4px; }
 .oo-charge .num { text-align: right; font-family: var(--mono); padding: 7px 6px; }
 .oo-vat { justify-self: center; width: 24px; height: 24px; padding: 0; border-radius: 7px; border: 1.5px solid var(--faint); background: transparent; color: var(--on-accent); font-size: 12px; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
@@ -378,7 +378,7 @@ textarea.oo-input { line-height: 1.5; resize: none; }
 }
 .oo-paper .k { font-size: 9px; letter-spacing: 0.07em; text-transform: uppercase; color: #6b7385; white-space: nowrap; }
 .oo-paper .kv { display: flex; flex-direction: column; gap: 1px; min-width: 0; overflow-wrap: anywhere; }
-.oo-paper .lines { display: grid; grid-template-columns: minmax(0, 1fr) 34px 78px 58px 56px 86px 62px; gap: 8px; }
+.oo-paper .lines { display: grid; grid-template-columns: minmax(0, 1fr) 34px var(--p-rate, 78px) 58px 56px var(--p-tot, 86px) 62px; gap: 8px; }
 
 /* ---------- Toast ---------- */
 .oo-toast {

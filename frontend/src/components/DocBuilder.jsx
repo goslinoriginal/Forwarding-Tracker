@@ -90,6 +90,16 @@ export default function DocBuilder({ initial, onClose }) {
   const [split, setSplit] = useState(readSplit);
   const [copied, setCopied] = useState(null);
   const copyTimer = useRef(null);
+  // The document is drawn 700px wide; in a narrower preview it shrinks to fit instead of being cut off
+  const previewRef = useRef(null);
+  const [paperZoom, setPaperZoom] = useState(1);
+  useEffect(() => {
+    const el = previewRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return undefined;
+    const ro = new ResizeObserver(([e]) => setPaperZoom(Math.min(1, Math.max(0.4, (e.contentRect.width - 4) / 700))));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
@@ -166,6 +176,7 @@ export default function DocBuilder({ initial, onClose }) {
     let root = document.getElementById("oo-print-root");
     if (!root) { root = document.createElement("div"); root.id = "oo-print-root"; document.body.appendChild(root); }
     root.innerHTML = paper.outerHTML;
+    root.firstElementChild.style.zoom = ""; // print at full size, not the shrunk preview
     const title = document.title;
     document.title = d.no;
     document.body.classList.add("printing-doc");
@@ -276,8 +287,17 @@ export default function DocBuilder({ initial, onClose }) {
   }));
 
   const live = c.lines.filter((l) => !l.off && l.zar);
+  // The ZAR column grows with the biggest amount (13px mono ≈ 8px a character), so it never spills over
+  const zarColW = Math.max(96, ...c.lines.map((l) => money("ZAR", l.zar).length * 8 + 6), money("ZAR", c.total).length * 8 + 6);
   const unitsTxt = (l) => (l.basis === "cntr" ? String(c.cn) : l.basis === "cbm" || l.basis === "depot" ? c.cbm.toFixed(3) : "1");
   const rateTxt = (l) => (l.basis === "pct" ? `${l.rate}%` : l.basis === "depot" ? `${l.base || 0}+${l.rate}` : fmt(num(l.rate)));
+  // Same for the document's money columns (11px mono ≈ 6.7px, the 13px bold totals ≈ 8px a character)
+  const paperVars = {
+    "--p-rate": `${Math.max(78, ...live.map((l) => rateTxt(l).length * 6.7 + 4))}px`,
+    "--p-tot": `${Math.max(86, ...live.map((l) => fmt(l.zar).length * 6.7 + 4))}px`,
+    "--p-sub": `${Math.max(110, fmt(c.sub).length * 7.2 + 6)}px`,
+    "--p-sum": `${Math.max(120, money("ZAR", c.total).length * 8 + 8)}px`,
+  };
   const prevGroups = GROUPS.map(([g, label]) => {
     const rows = live.filter((l) => l.group === g);
     if (!rows.length) return null;
@@ -448,7 +468,7 @@ export default function DocBuilder({ initial, onClose }) {
               <span style={{ fontSize: 12, color: "var(--mute)" }}>Calculated as per the rate sheet. Zero lines are left off the document and EasyClear list.</span>
             </div>
             <div style={{ overflowX: "auto", margin: "0 -4px", padding: "0 4px" }}>
-              <div style={{ minWidth: 500, display: "flex", flexDirection: "column", gap: 6 }}>
+              <div style={{ minWidth: 500, display: "flex", flexDirection: "column", gap: 6, "--zar-w": `${zarColW}px` }}>
                 <div className="oo-charge" style={{ fontSize: 11, fontWeight: 500, color: "var(--mute)", padding: "0 2px" }}>
                   <span>Description</span><span>Cur</span><span>Basis</span><span>Rate</span><span className="c">VAT</span><span className="r">ZAR</span><span />
                 </div>
@@ -516,7 +536,7 @@ export default function DocBuilder({ initial, onClose }) {
               </button>
             )}
           </div>
-          <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 20 }}>
+          <div ref={previewRef} style={{ flex: 1, minHeight: 0, overflow: "auto", padding: 20 }}>
             {tab === "ec" ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 12, animation: "fadeIn .25s both" }}>
                 <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
@@ -565,7 +585,7 @@ export default function DocBuilder({ initial, onClose }) {
                 <span className="oo-sub" style={{ fontSize: 12 }}>{doneN} of {live.length} lines entered in EasyClear</span>
               </div>
             ) : (
-              <div className="oo-paper">
+              <div className="oo-paper" style={{ ...paperVars, zoom: paperZoom }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16 }}>
                   <span style={{ fontSize: 15, fontWeight: 700, letterSpacing: "-.01em", color: `oklch(0.42 0.13 ${ent.h})` }}>{ent.label}</span>
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, textAlign: "right" }}>
@@ -610,7 +630,7 @@ export default function DocBuilder({ initial, onClose }) {
                           <span className="r" style={{ color: "#6b7385" }}>{l.vat ? fmt(l.vatAmt) : "—"}</span>
                         </div>
                       ))}
-                      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 110px 62px", gap: 8, padding: "7px 0 12px", fontWeight: 700 }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) var(--p-sub) 62px", gap: 8, padding: "7px 0 12px", fontWeight: 700 }}>
                         <span style={{ letterSpacing: ".04em", textTransform: "uppercase", fontSize: 10, paddingTop: 1 }}>{g.label}</span>
                         <span className="mono r">{g.sub}</span>
                         <span className="mono r" style={{ color: "#6b7385", fontWeight: 500 }}>{g.vat}</span>
@@ -618,7 +638,7 @@ export default function DocBuilder({ initial, onClose }) {
                     </div>
                   ))}
                   {!live.length && <div style={{ padding: "18px 0", color: "#9aa1b0", textAlign: "center", borderBottom: "1px solid #e6e9f0" }}>No charges yet</div>}
-                  <div style={{ alignSelf: "flex-end", display: "grid", gridTemplateColumns: "auto 120px", gap: "5px 24px", paddingTop: 8, minWidth: 260 }}>
+                  <div style={{ alignSelf: "flex-end", display: "grid", gridTemplateColumns: "auto var(--p-sum)", gap: "5px 24px", paddingTop: 8, minWidth: 260 }}>
                     <span style={{ color: "#6b7385" }}>Total excluding VAT</span><span className="mono r">{money("ZAR", c.sub)}</span>
                     <span style={{ color: "#6b7385" }}>Total VAT</span><span className="mono r">{money("ZAR", c.vat)}</span>
                     <span style={{ fontSize: 13, fontWeight: 700, paddingTop: 6, borderTop: "1.5px solid #1c2333" }}>Total including VAT</span>
