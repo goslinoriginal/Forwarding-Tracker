@@ -1,15 +1,16 @@
 import { useMemo, useState } from "react";
 import { api } from "@/lib/api";
-import { downloadCreditRequest, useCreditRequests, useRefresh } from "@/lib/data";
+import { downloadCreditList, downloadCreditNote, useCreditLists, useCreditNotes, useRefresh } from "@/lib/data";
 import { awaitingCredit, calc, money } from "@/lib/billingCalc";
 import { Modal, dmy, todayIso, useToast } from "@/lib/ui";
 
 /* Clearfreight freight statements get credited once the shipment's client has been
-   invoiced. This lists the accepted ones still waiting, and turns a selection into a
-   credit note request: the List plus a PRO-FORMA CREDIT NOTE per file, in the
-   forwarding team's own credit note workbook. */
+   invoiced. Credit notes are done file by file — each downloads as its own
+   PRO-FORMA CREDIT NOTE (two copies, to file with the invoice) — and every one joins
+   the open CREDIT NOTE REQUEST list. Printing the list closes that batch. */
 
-const COLS = "36px minmax(150px,1.3fr) 84px 96px 92px 84px 120px minmax(110px,0.8fr)";
+const COLS = "minmax(150px,1.3fr) 84px 96px 92px 70px 124px 96px";
+const LIST_COLS = "84px 110px 110px minmax(120px,1fr) 124px 190px";
 
 const daysTo = (iso) => {
   if (!iso) return null;
@@ -17,13 +18,15 @@ const daysTo = (iso) => {
   const t = new Date();
   return Math.round((new Date(y, m - 1, d) - new Date(t.getFullYear(), t.getMonth(), t.getDate())) / 86400000);
 };
+const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
 export default function CreditsView({ docs, clients, ships, onOpenDoc }) {
   const toast = useToast();
   const refresh = useRefresh();
-  const { data: requests = [] } = useCreditRequests();
-  const [picked, setPicked] = useState({});
-  const [asking, setAsking] = useState(null);
+  const { data: notes = [] } = useCreditNotes();
+  const { data: lists = [] } = useCreditLists();
+  const [crediting, setCrediting] = useState(null);
+  const [printing, setPrinting] = useState(false);
 
   const nameOf = (id) => clients.find((c) => c.id === id)?.name || "—";
   const shipFor = (d) => ships.find((s) => s.file_number === d.file && s.client_id === d.clientId) || ships.find((s) => d.file && s.file_number === d.file);
@@ -35,23 +38,26 @@ export default function CreditsView({ docs, clients, ships, onOpenDoc }) {
   }).sort((a, b) => (a.eta || "9999").localeCompare(b.eta || "9999")), [docs, ships]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const total = rows.reduce((a, r) => a + r.amount, 0);
-  const sel = rows.filter((r) => picked[r.d.id]);
-  const selTotal = sel.reduce((a, r) => a + r.amount, 0);
-  const allOn = rows.length > 0 && sel.length === rows.length;
-  const today = todayIso();
-  const todays = requests.filter((r) => r.date === today);
-  const earlier = requests.filter((r) => r.date !== today);
+  const arrived = rows.filter((r) => r.days !== null && r.days <= 0);
+  const open = notes.filter((n) => !n.listId).slice().reverse(); // oldest first, like the list prints
+  const openTotal = open.reduce((a, n) => a + n.amount, 0);
+  const reload = () => refresh("documents", "credit-notes", "credit-lists");
 
-  const undo = async (req) => {
-    if (!window.confirm(`Undo ${req.no}? Its ${req.notes.length} pro forma${req.notes.length === 1 ? "" : "s"} go back to Awaiting credit.`)) return;
-    try {
-      await api.delete(`/credit-requests/${req.id}`);
-      await refresh("documents", "credit-requests");
-      toast(`${req.no} undone`);
-    } catch { toast("Couldn't undo the request", { error: true }); }
+  const download = async (fn, x) => { try { await fn(x); } catch { toast("Download failed", { error: true }); } };
+  const undo = async (n) => {
+    if (!window.confirm(`Undo the credit note for file ${n.file}? It goes back to Awaiting credit.`)) return;
+    try { await api.delete(`/credit-notes/${n.id}`); await reload(); toast(`File ${n.file} back to Awaiting credit`); } catch (e) { toast(e?.response?.data?.detail || "Couldn't undo", { error: true }); }
   };
-  const download = async (req) => {
-    try { await downloadCreditRequest(req); } catch { toast("Download failed", { error: true }); }
+  const printList = async () => {
+    if (!window.confirm(`Print the list of ${plural(open.length, "credit note")} (${money("ZAR", openTotal)})? The list is then cleared for the next batch.`)) return;
+    setPrinting(true);
+    try {
+      const { data } = await api.post("/credit-lists", { date: todayIso() });
+      await reload();
+      toast(`${data.no} downloaded · ${plural(data.notes.length, "credit note")} · list cleared for the next batch`);
+      await download(downloadCreditList, data);
+    } catch (e) { toast(e?.response?.data?.detail || "Couldn't print the list", { error: true }); }
+    finally { setPrinting(false); }
   };
 
   return (
@@ -59,38 +65,32 @@ export default function CreditsView({ docs, clients, ships, onOpenDoc }) {
       <div className="oo-kpis" style={{ gridTemplateColumns: "repeat(3, minmax(0,1fr))" }}>
         <div className="oo-kpi" style={{ background: "var(--amb-bg)", color: "var(--amb-fg)" }} data-testid="await-total">
           <span>Still to be credited</span><span className="n" style={{ fontSize: 26 }}>{money("ZAR", total)}</span>
-          <span style={{ fontSize: 12, opacity: 0.85 }}>{rows.length} freight statement{rows.length === 1 ? "" : "s"} accepted, not yet credited</span>
+          <span style={{ fontSize: 12, opacity: 0.85 }}>{plural(rows.length, "freight statement")} accepted, not yet credited</span>
         </div>
         <div className="oo-kpi" style={{ background: "var(--sub)", border: "1px solid var(--line2)" }}>
           <span style={{ color: "var(--ink2)" }}>Arrived (ETA passed)</span>
-          <span className="n" style={{ fontSize: 26 }}>{money("ZAR", rows.filter((r) => r.days !== null && r.days <= 0).reduce((a, r) => a + r.amount, 0))}</span>
-          <span style={{ fontSize: 12, color: "var(--mute)" }}>{rows.filter((r) => r.days !== null && r.days <= 0).length} file{rows.filter((r) => r.days !== null && r.days <= 0).length === 1 ? "" : "s"} — likely invoiced to the client already</span>
+          <span className="n" style={{ fontSize: 26 }}>{money("ZAR", arrived.reduce((a, r) => a + r.amount, 0))}</span>
+          <span style={{ fontSize: 12, color: "var(--mute)" }}>{plural(arrived.length, "file")} — likely invoiced to the client already</span>
         </div>
         <div className="oo-kpi" style={{ background: "var(--accent-soft)", color: "var(--accent-ink)" }}>
-          <span>Requested today</span>
-          <span className="n" style={{ fontSize: 26 }}>{money("ZAR", todays.reduce((a, r) => a + r.total, 0))}</span>
-          <span style={{ fontSize: 12, opacity: 0.85 }}>{todays.reduce((a, r) => a + r.notes.length, 0)} credit note{todays.reduce((a, r) => a + r.notes.length, 0) === 1 ? "" : "s"} in {todays.length} request{todays.length === 1 ? "" : "s"}</span>
+          <span>On the current list</span><span className="n" style={{ fontSize: 26 }}>{money("ZAR", openTotal)}</span>
+          <span style={{ fontSize: 12, opacity: 0.85 }}>{plural(open.length, "credit note")} — not printed yet</span>
         </div>
       </div>
 
       <div className="oo-card scroll">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "18px 20px 12px", flexWrap: "wrap" }}>
+        <div className="oo-card-head">
           <div className="oo-card-title">
             <h2 className="oo-h2">Awaiting credit</h2>
-            <span className="oo-sub">Clearfreight freight statements marked Accepted. Tick the ones whose client has been invoiced, then request the credit notes.</span>
+            <span className="oo-sub">Clearfreight freight statements marked Accepted. Once the client has been invoiced, click Credit, type the two invoice numbers, and print the credit note (2 copies).</span>
           </div>
-          <button type="button" className="oo-btn primary" disabled={!sel.length} onClick={() => setAsking(sel)} data-testid="request-credit">
-            {sel.length ? `Request credit · ${sel.length} file${sel.length === 1 ? "" : "s"} · ${money("ZAR", selTotal)}` : "Tick files to credit"}
-          </button>
         </div>
-        <div style={{ minWidth: 900 }}>
+        <div style={{ minWidth: 820 }}>
           <div className="oo-grid-head" style={{ gridTemplateColumns: COLS }}>
-            <input type="checkbox" checked={allOn} onChange={() => setPicked(allOn ? {} : Object.fromEntries(rows.map((r) => [r.d.id, true])))} title="Select all" />
-            <span>Client</span><span>File #</span><span>Pro forma</span><span>ETA</span><span className="r">Days</span><span className="r">Amount</span><span>Invoice Nº</span>
+            <span>Client</span><span>File #</span><span>Pro forma</span><span>ETA</span><span className="r">Days</span><span className="r">Amount</span><span />
           </div>
           {rows.map(({ d, eta, days, amount, archived }, i) => (
-            <div key={d.id} className="oo-grid-row" style={{ gridTemplateColumns: COLS, fontSize: 14, background: picked[d.id] ? "var(--accent-soft)" : undefined, animationDelay: `${Math.min(i, 12) * 30}ms` }} data-testid={`await-${d.file}`}>
-              <input type="checkbox" checked={!!picked[d.id]} onChange={() => setPicked({ ...picked, [d.id]: !picked[d.id] })} />
+            <div key={d.id} className="oo-grid-row" style={{ gridTemplateColumns: COLS, fontSize: 14, animationDelay: `${Math.min(i, 12) * 30}ms` }} data-testid={`await-${d.file}`}>
               <span className="oo-ellipsis" style={{ fontWeight: 600 }}>{nameOf(d.clientId)}</span>
               <span className="mono" style={{ fontSize: 13 }}>{d.file || "—"}</span>
               <button type="button" className="oo-link mono" style={{ justifySelf: "start", fontSize: 13 }} onClick={() => onOpenDoc(d)}>{d.no}</button>
@@ -99,12 +99,12 @@ export default function CreditsView({ docs, clients, ships, onOpenDoc }) {
                 {days === null ? "—" : days <= 0 ? (archived ? "ANF" : "Arrived") : `${days}d`}
               </span>
               <span className="mono r" style={{ fontWeight: 600 }}>{money("ZAR", amount)}</span>
-              <span className="mono" style={{ fontSize: 13, color: d.fsInvoice ? "var(--ink2)" : "var(--faint)" }}>{d.fsInvoice || "not set"}</span>
+              <button type="button" className="oo-btn primary sm" style={{ justifySelf: "end" }} onClick={() => setCrediting({ d, amount })} data-testid={`credit-${d.file}`}>Credit</button>
             </div>
           ))}
           {rows.length > 0 && (
             <div className="oo-grid-row" style={{ gridTemplateColumns: COLS, fontSize: 14, fontWeight: 600, background: "var(--sub)" }}>
-              <span /><span>Total · {rows.length} file{rows.length === 1 ? "" : "s"}</span><span /><span /><span /><span />
+              <span>Total · {plural(rows.length, "file")}</span><span /><span /><span /><span />
               <span className="mono r">{money("ZAR", total)}</span><span />
             </div>
           )}
@@ -117,44 +117,71 @@ export default function CreditsView({ docs, clients, ships, onOpenDoc }) {
         </div>
       </div>
 
-      <div className="oo-card">
-        <div className="oo-card-head">
+      <div className="oo-card scroll">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "20px 24px 12px", flexWrap: "wrap" }}>
           <div className="oo-card-title">
-            <h2 className="oo-h2">Credit note requests</h2>
-            <span className="oo-sub">Each request downloads as your credit note workbook: the CREDIT NOTE REQUEST list plus a PRO-FORMA CREDIT NOTE per file.</span>
+            <h2 className="oo-h2">Current list</h2>
+            <span className="oo-sub">The CREDIT NOTE REQUEST for this batch. Printing it clears the list for the next batch.</span>
           </div>
+          <button type="button" className="oo-btn primary" disabled={!open.length || printing} onClick={printList} data-testid="print-list">
+            {open.length ? `Print list · ${plural(open.length, "credit note")} · ${money("ZAR", openTotal)}` : "No credit notes yet"}
+          </button>
         </div>
-        {[["Today", todays], ["Earlier", earlier]].filter(([, l]) => l.length).map(([label, list]) => (
-          <div key={label} style={{ display: "flex", flexDirection: "column" }}>
-            <span style={{ padding: "10px 24px 6px", fontSize: 12, fontWeight: 600, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--mute)", borderTop: "1px solid var(--line2)" }}>{label}</span>
-            {list.map((r) => (
-              <div key={r.id} className="oo-prio-row" data-testid={`creq-${r.no}`}>
-                <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 150 }}>
-                  <b className="mono">{r.no}</b>
-                  <span style={{ fontSize: 12, color: "var(--mute)" }}>{dmy(r.date)} · {r.notes.length} credit note{r.notes.length === 1 ? "" : "s"}</span>
-                </div>
-                <span style={{ flex: 1, fontSize: 13, color: "var(--ink2)", minWidth: 200 }}>{r.notes.map((n) => n.file).join(", ")}</span>
-                <span className="mono" style={{ fontWeight: 600 }}>{money("ZAR", r.total)}</span>
-                <button type="button" className="oo-btn sm" onClick={() => download(r)}>Download Excel</button>
-                <button type="button" className="oo-link" style={{ color: "var(--red-fg)" }} onClick={() => undo(r)}>Undo</button>
+        {open.length > 0 && (
+          <div style={{ minWidth: 760 }}>
+            <div className="oo-grid-head" style={{ gridTemplateColumns: LIST_COLS }}>
+              <span>File #</span><span>Inv. Nº</span><span>Recovered on</span><span>Client</span><span className="r">Amount</span><span />
+            </div>
+            {open.map((n) => (
+              <div key={n.id} className="oo-grid-row" style={{ gridTemplateColumns: LIST_COLS, fontSize: 14 }} data-testid={`open-${n.file}`}>
+                <span className="mono" style={{ fontWeight: 600 }}>{n.file}</span>
+                <span className="mono">{n.fs_invoice}</span>
+                <span className="mono" style={{ color: "var(--ink2)" }}>{n.client_invoice}</span>
+                <span className="oo-ellipsis" style={{ color: "var(--ink2)" }}>{nameOf(n.clientId)} · {n.docNo}</span>
+                <span className="mono r" style={{ fontWeight: 600 }}>{money("ZAR", n.amount)}</span>
+                <span style={{ display: "flex", gap: 12, justifyContent: "flex-end", alignItems: "center" }}>
+                  <button type="button" className="oo-link" onClick={() => download(downloadCreditNote, n)}>Credit note again</button>
+                  <button type="button" className="oo-link" style={{ color: "var(--red-fg)" }} onClick={() => undo(n)}>Undo</button>
+                </span>
               </div>
             ))}
+            <div className="oo-grid-row" style={{ gridTemplateColumns: LIST_COLS, fontSize: 14, fontWeight: 600, background: "var(--sub)" }}>
+              <span>Total</span><span /><span /><span /><span className="mono r">{money("ZAR", openTotal)}</span><span />
+            </div>
           </div>
-        ))}
-        {!requests.length && <div className="oo-empty"><span className="oo-sub">No credit note requests yet.</span></div>}
+        )}
+        {!open.length && <div className="oo-empty" style={{ paddingTop: 16 }}><span className="oo-sub">Credit notes you do appear here until the list is printed.</span></div>}
       </div>
 
-      {asking && (
+      {lists.length > 0 && (
+        <div className="oo-card">
+          <div className="oo-card-head">
+            <div className="oo-card-title"><h2 className="oo-h2">Printed lists</h2><span className="oo-sub">Earlier batches, in case you need to print one again.</span></div>
+          </div>
+          {lists.map((l) => (
+            <div key={l.id} className="oo-prio-row" data-testid={`list-${l.no}`}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 140 }}>
+                <b className="mono">{l.no}</b>
+                <span style={{ fontSize: 12, color: "var(--mute)" }}>{dmy(l.date)} · {plural(l.notes.length, "credit note")}</span>
+              </div>
+              <span style={{ flex: 1, fontSize: 13, color: "var(--ink2)", minWidth: 200 }}>{l.notes.map((n) => n.file).join(", ")}</span>
+              <span className="mono" style={{ fontWeight: 600 }}>{money("ZAR", l.total)}</span>
+              <button type="button" className="oo-btn sm" onClick={() => download(downloadCreditList, l)}>Download list</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {crediting && (
         <CreditModal
-          rows={asking}
+          row={crediting}
           nameOf={nameOf}
-          onClose={() => setAsking(null)}
-          onDone={async (req) => {
-            setAsking(null);
-            setPicked({});
-            await refresh("documents", "credit-requests");
-            toast(`${req.no} · ${req.notes.length} credit note${req.notes.length === 1 ? "" : "s"} · ${money("ZAR", req.total)} — workbook downloaded`);
-            download(req);
+          onClose={() => setCrediting(null)}
+          onDone={async (note) => {
+            setCrediting(null);
+            await reload();
+            toast(`Credit note for file ${note.file} · ${money("ZAR", note.amount)} — downloaded (2 copies) and added to the list`);
+            download(downloadCreditNote, note);
           }}
         />
       )}
@@ -166,63 +193,48 @@ export default function CreditsView({ docs, clients, ships, onOpenDoc }) {
    total; account, client name, code, description and VAT (none) never change. */
 const SIX = /^\d{6}$/;
 
-function CreditModal({ rows, nameOf, onClose, onDone }) {
+function CreditModal({ row, nameOf, onClose, onDone }) {
   const toast = useToast();
-  const [f, setF] = useState(() => Object.fromEntries(rows.map(({ d }) => [d.id, { fs: d.fsInvoice || "", client: d.clientInvoice || "" }])));
+  const { d, amount } = row;
+  const [fs, setFs] = useState(d.fsInvoice || "");
+  const [client, setClient] = useState(d.clientInvoice || "");
   const [busy, setBusy] = useState(false);
-  const set = (id, k) => (e) => setF({ ...f, [id]: { ...f[id], [k]: e.target.value.replace(/\D/g, "").slice(0, 6) } });
-  const missing = rows.filter(({ d }) => !SIX.test(f[d.id].fs) || !SIX.test(f[d.id].client)).length;
-  const total = rows.reduce((a, { amount }) => a + amount, 0);
-  const G = "84px minmax(110px,1fr) 120px 130px 130px";
+  const digits = (set) => (e) => set(e.target.value.replace(/\D/g, "").slice(0, 6));
+  const ok = SIX.test(fs) && SIX.test(client);
 
   const create = async () => {
-    if (missing) { toast("Both invoice numbers need 6 digits for every file", { error: true }); return; }
+    if (!ok) { toast("Both invoice numbers need 6 digits", { error: true }); return; }
     setBusy(true);
     try {
-      const { data } = await api.post("/credit-requests", {
-        date: todayIso(),
-        notes: rows.map(({ d, amount }) => ({ docId: d.id, amount, fs_invoice: f[d.id].fs, client_invoice: f[d.id].client })),
-      });
+      const { data } = await api.post("/credit-notes", { docId: d.id, amount, fs_invoice: fs, client_invoice: client, date: todayIso() });
       onDone(data);
     } catch (e) {
-      toast(e?.response?.data?.detail || "Couldn't create the credit notes", { error: true });
+      toast(e?.response?.data?.detail || "Couldn't create the credit note", { error: true });
       setBusy(false);
     }
   };
+  const box = (v) => ({ borderColor: v && !SIX.test(v) ? "var(--amb-fg)" : undefined, letterSpacing: ".08em" });
 
   return (
-    <Modal onClose={onClose} wide>
+    <Modal onClose={onClose}>
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        <h2>Request credit notes</h2>
-        <span style={{ fontSize: 14, color: "var(--mute)" }}>
-          Only the two invoice numbers are needed. Account 5613 · FREIGHT STATEMENT · 30050 FORWARDING · no VAT — the amount is the freight statement's total.
-        </span>
+        <h2>Credit file {d.file}</h2>
+        <span style={{ fontSize: 14, color: "var(--mute)" }}>{nameOf(d.clientId)} · {d.no} · {money("ZAR", amount)} · dated today</span>
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: "55vh", overflowY: "auto" }}>
-        <div className="oo-grid-head" style={{ gridTemplateColumns: G, padding: "8px 4px", borderRadius: 8 }}>
-          <span>File #</span><span>Client</span><span className="r">Amount</span><span>Invoice Nº to be credited</span><span>Recovered on invoice</span>
-        </div>
-        {rows.map(({ d, amount }) => (
-          <div key={d.id} style={{ display: "grid", gridTemplateColumns: G, gap: 14, alignItems: "center", padding: "0 4px" }} data-testid={`cn-row-${d.file}`}>
-            <span className="mono" style={{ fontWeight: 600 }}>{d.file || "—"}</span>
-            <span className="oo-ellipsis" style={{ fontSize: 13, color: "var(--ink2)" }}>{nameOf(d.clientId)} · {d.no}</span>
-            <span className="mono r" style={{ fontWeight: 600 }}>{money("ZAR", amount)}</span>
-            <input className="oo-input mono" value={f[d.id].fs} onChange={set(d.id, "fs")} placeholder="320890" inputMode="numeric" maxLength={6} data-testid="cn-fs"
-              style={{ borderColor: f[d.id].fs && !SIX.test(f[d.id].fs) ? "var(--amb-fg)" : undefined }} />
-            <input className="oo-input mono" value={f[d.id].client} onChange={set(d.id, "client")} placeholder="321045" inputMode="numeric" maxLength={6} data-testid="cn-client"
-              style={{ borderColor: f[d.id].client && !SIX.test(f[d.id].client) ? "var(--amb-fg)" : undefined }} />
-          </div>
-        ))}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <label className="oo-field" style={{ gap: 8 }}>
+          <span style={{ fontSize: 13, color: "var(--ink)" }}>Invoice Nº to be credited</span>
+          <input className="oo-input big mono" value={fs} onChange={digits(setFs)} placeholder="6 digits" inputMode="numeric" maxLength={6} autoFocus style={box(fs)} data-testid="cn-fs" />
+        </label>
+        <label className="oo-field" style={{ gap: 8 }}>
+          <span style={{ fontSize: 13, color: "var(--ink)" }}>Forwarding recovered on invoice</span>
+          <input className="oo-input big mono" value={client} onChange={digits(setClient)} placeholder="6 digits" inputMode="numeric" maxLength={6} style={box(client)} onKeyDown={(e) => e.key === "Enter" && create()} data-testid="cn-client" />
+        </label>
       </div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, fontSize: 14 }}>
-        <span style={{ color: missing ? "var(--amb-fg)" : "var(--ink2)" }}>{missing ? `${missing} file${missing === 1 ? "" : "s"} still need${missing === 1 ? "s" : ""} both 6-digit invoice numbers` : "Ready"}</span>
-        <b className="mono">Total {money("ZAR", total)}</b>
-      </div>
+      <span style={{ fontSize: 12, color: "var(--mute)" }}>Account 5613 · FREIGHT STATEMENT · 30050 FORWARDING · {money("ZAR", amount)} · no VAT. Downloads as one PRO-FORMA CREDIT NOTE with 2 copies, and goes on the current list.</span>
       <div className="oo-modal-actions">
         <button type="button" className="oo-btn foot" style={{ padding: "11px 18px" }} onClick={onClose}>Cancel</button>
-        <button type="button" className="oo-btn primary foot" style={{ padding: "11px 20px" }} onClick={create} disabled={busy} data-testid="cn-create">
-          Create {rows.length} credit note{rows.length === 1 ? "" : "s"} & download
-        </button>
+        <button type="button" className="oo-btn primary foot" style={{ padding: "11px 20px" }} onClick={create} disabled={busy || !ok} data-testid="cn-create">Create credit note</button>
       </div>
     </Modal>
   );

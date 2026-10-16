@@ -523,7 +523,7 @@ export default function DocBuilder({ initial, onClose }) {
               ) : credited ? (
                 <span className="oo-note" style={{ alignSelf: "flex-start" }}>
                   <b>Credited</b>
-                  <span>On credit note request {dc.creditRequestNo}{dc.creditedOn ? ` · ${dmy(dc.creditedOn)}` : ""}{dc.clientInvoice ? ` · recovered on invoice ${dc.clientInvoice}` : ""}</span>
+                  <span>Pro-forma credit note done{dc.creditedOn ? ` ${dmy(dc.creditedOn)}` : ""}{dc.fsInvoice ? ` · invoice ${dc.fsInvoice} credited` : ""}{dc.clientInvoice ? ` · recovered on invoice ${dc.clientInvoice}` : ""}</span>
                 </span>
               ) : (
                 <Seg value={pfiStatus(dc)} onChange={(v) => setD({ status: v })} options={["Draft", "Accepted"].map((s) => ({ value: s, label: s }))} />
@@ -532,7 +532,7 @@ export default function DocBuilder({ initial, onClose }) {
             {!isQ && !credited && (
               <span style={{ fontSize: 12, color: "var(--mute)" }}>
                 {needsCredit(dc)
-                  ? "Mark it Accepted once it's final — it then waits under Awaiting credit until the client has been invoiced and you request the credit note."
+                  ? "Mark it Accepted once it's final — it then waits under Awaiting credit until the client has been invoiced and you do its credit note."
                   : "Patuma freight invoices aren't credited."}
               </span>
             )}

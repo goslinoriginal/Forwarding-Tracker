@@ -17,6 +17,7 @@ from openpyxl.drawing.image import Image
 
 TEMPLATE = Path(__file__).parent / "static" / "templates" / "credit_note_template.xlsx"
 LIST_ROWS = 12  # request lines on one List sheet (rows 4–15)
+FORM_ROWS = 31  # the PRO-FORMA CREDIT NOTE form is rows 1–31
 CREDIT_CODE = 30050
 CREDIT_DESCRIPTION = "FORWARDING"
 
@@ -58,9 +59,14 @@ def _copy_print_setup(src, dst) -> None:
 AUTO_ROWS = {"List": (2,), "CN": (29, 31)}
 
 
+# Fixed heights that already fit the wrapped text, so pictures below them (the second
+# copy's logo) are placed exactly — a row left to grow would push the page out of step
+FIT_HEIGHTS = {29: 30, 31: 16}
+
+
 def _auto_rows(ws, rows) -> None:
     for r in rows:
-        ws.row_dimensions[r].height = None
+        ws.row_dimensions[r].height = FIT_HEIGHTS.get(r) if ws.title.startswith("CN") or ws.title == "CN" else None
 
 
 def _fill_note(ws, day: date, n: dict) -> None:
@@ -100,12 +106,60 @@ def _fill_list(ws, day: date, notes: list[dict]) -> None:
     ws["E26"] = f"Date:         {day.strftime('%Y/%m/%d')}"
 
 
-def build_credit_workbook(day: date, notes: list[dict]) -> bytes:
-    """notes: [{file, fs_invoice, client_invoice, amount}] → the request workbook."""
-    wb = load_workbook(TEMPLATE, rich_text=True)  # keeps the raised "st" in "Authorised 1st Director"
-    list_tpl, cn_tpl = wb["List"], wb["CN"]
+def _duplicate_below(ws, rows: int, logo: bytes) -> None:
+    """Repeats the form (rows 1..rows) straight under itself, with a page break
+    between, so one print gives the two copies that get filed."""
+    from openpyxl.worksheet.pagebreak import Break
 
-    # One List per 12 credit notes (the template has 12 request lines)
+    for r in range(1, rows + 1):
+        ws.row_dimensions[r + rows].height = ws.row_dimensions[r].height
+        for c in range(1, ws.max_column + 1):
+            src = ws.cell(row=r, column=c)
+            dst = ws.cell(row=r + rows, column=c)
+            dst.value = copy.copy(src.value)
+            if src.has_style:
+                dst._style = copy.copy(src._style)
+    for m in list(ws.merged_cells.ranges):
+        if m.max_row <= rows:
+            ws.merge_cells(start_row=m.min_row + rows, start_column=m.min_col, end_row=m.max_row + rows, end_column=m.max_col)
+    for img in list(ws._images):
+        new = Image(io.BytesIO(logo))
+        new.anchor = copy.deepcopy(img.anchor)
+        new.anchor._from.row += rows
+        if getattr(new.anchor, "to", None) is not None:
+            new.anchor.to.row += rows
+        new.width, new.height = img.width, img.height
+        ws.add_image(new)
+    ws.row_breaks.append(Break(id=rows))
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0  # follow the page break: one copy per page
+    ws.print_area = f"A1:{ws.cell(row=1, column=ws.max_column).column_letter}{rows * 2}"
+
+
+def build_note_workbook(day: date, note: dict) -> bytes:
+    """One PRO-FORMA CREDIT NOTE, dated `day`, with the form twice (2 pages)."""
+    wb = load_workbook(TEMPLATE, rich_text=True)  # keeps the raised "st" in "Authorised 1st Director"
+    wb.remove(wb["List"])
+    ws = wb["CN"]
+    # Names in the template point at the List's table; without the List they'd make Excel "repair" the file
+    for n in list(wb.defined_names):
+        del wb.defined_names[n]
+    for n in list(ws.defined_names):
+        del ws.defined_names[n]
+    _fill_note(ws, day, note)
+    _auto_rows(ws, AUTO_ROWS["CN"])
+    _duplicate_below(ws, FORM_ROWS, _logo_bytes())
+    ws.title = f"CN {str(note.get('file') or '').strip()}"[:31] or "CN"
+    out = io.BytesIO()
+    wb.save(out)
+    return out.getvalue()
+
+
+def build_list_workbook(day: date, notes: list[dict]) -> bytes:
+    """The CREDIT NOTE REQUEST list for one batch (one List sheet per 12 credit notes)."""
+    wb = load_workbook(TEMPLATE, rich_text=True)
+    wb.remove(wb["CN"])
+    list_tpl = wb["List"]
     chunks = [notes[i:i + LIST_ROWS] for i in range(0, len(notes), LIST_ROWS)] or [[]]
     lists = [list_tpl]
     for k in range(1, len(chunks)):
@@ -115,27 +169,7 @@ def build_credit_workbook(day: date, notes: list[dict]) -> bytes:
         lists.append(extra)
     for ws, chunk in zip(lists, chunks):
         _fill_list(ws, day, chunk)
-
-    # Copy the blank CN sheet first, then fill each one in
-    logo = _logo_bytes() if len(notes) > 1 else b""
-    sheets = [cn_tpl] if notes else []
-    for _ in notes[1:]:
-        ws = wb.copy_worksheet(cn_tpl)
-        _copy_logo(cn_tpl, ws, logo)
-        _copy_print_setup(cn_tpl, ws)
-        sheets.append(ws)
-    for ws, n in zip(sheets, notes):
-        _fill_note(ws, day, n)
-        _auto_rows(ws, AUTO_ROWS["CN"])
-    for ws in lists:
         _auto_rows(ws, AUTO_ROWS["List"])
-    if not notes:
-        wb.remove(cn_tpl)
-    for i, ws in enumerate(sheets):
-        ws.title = f"CN-{i + 1}"
-
-    wb._sheets = lists + sheets  # List first, then CN-1, CN-2, …
-    wb.active = 0
     out = io.BytesIO()
     wb.save(out)
     return out.getvalue()

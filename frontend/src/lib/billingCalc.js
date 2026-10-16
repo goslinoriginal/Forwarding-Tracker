@@ -185,7 +185,7 @@ export const dotDecimal = (v) => String(v || "").trim().replace(/\s/g, "").repla
 /** A pro forma's status: Draft → Accepted (marked by you) → Credited (on a credit note request).
  *  Older pro formas marked "Sent" or "Paid" count as Accepted. */
 export function pfiStatus(d) {
-  if (d.creditRequestId || d.status === "Credited") return "Credited";
+  if (d.creditNoteId || d.status === "Credited") return "Credited";
   return ["Accepted", "Sent", "Paid"].includes(d.status) ? "Accepted" : "Draft";
 }
 

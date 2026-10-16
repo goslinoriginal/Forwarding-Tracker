@@ -2395,96 +2395,131 @@ async def delete_document(doc_id: str):
 
 # ---------- Import old Excel status reports ----------
 # ---------- Pro-forma credit notes ----------
-# Clearfreight freight statements are credited once the shipment has been invoiced
-# to the client. A request credits a batch of accepted pro formas at once and is
-# written into the forwarding team's own credit note workbook (see credit_notes.py).
-from credit_notes import build_credit_workbook  # noqa: E402
+# Clearfreight freight statements are credited once the shipment has been invoiced to
+# the client. Each file gets its own PRO-FORMA CREDIT NOTE (printed twice, for filing),
+# and every credit note joins the open CREDIT NOTE REQUEST list until that list is
+# printed, which closes the batch. Both are written into the forwarding team's own
+# credit note workbook (see credit_notes.py).
+from credit_notes import build_list_workbook, build_note_workbook  # noqa: E402
+
+SIX_DIGITS = re.compile(r"\d{6}")
 
 
-class CreditNoteLine(BaseModel):
+class CreditNotePayload(BaseModel):
     docId: str
-    amount: float
+    amount: float  # the freight statement's total
     fs_invoice: str  # the freight statement's invoice Nº (what gets credited)
     client_invoice: str  # the client's invoice it was recovered on
+    date: str  # YYYY-MM-DD, the office's local day
 
 
-class CreditRequestPayload(BaseModel):
-    date: str  # YYYY-MM-DD (the office's local day)
-    notes: List[CreditNoteLine]
+class CreditListPayload(BaseModel):
+    date: str
 
 
-async def _next_credit_no() -> str:
-    year = date.today().strftime("%y")
-    n = await db.credit_requests.count_documents({"no": {"$regex": f"^CR-{year}-"}})
-    return f"CR-{year}-{n + 1:03d}"
-
-
-@api_router.get("/credit-requests")
-async def list_credit_requests():
-    return await db.credit_requests.find({}, _proj()).sort("created_at", -1).to_list(500)
-
-
-@api_router.post("/credit-requests")
-async def create_credit_request(payload: CreditRequestPayload):
-    if not payload.notes:
-        raise HTTPException(status_code=400, detail="Choose at least one pro forma to credit")
+def _day(iso: str) -> date:
     try:
-        day = date.fromisoformat(payload.date)
+        return date.fromisoformat(iso)
     except ValueError:
         raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
-    notes = []
-    for line in payload.notes:
-        doc = await db.documents.find_one({"id": line.docId}, _proj())
-        if not doc or doc.get("type") != "pfi":
-            raise HTTPException(status_code=404, detail="Pro forma not found")
-        if doc.get("creditRequestId"):
-            raise HTTPException(status_code=409, detail=f"{doc.get('no')} has already been credited")
-        if not (re.fullmatch(r"\d{6}", line.fs_invoice.strip()) and re.fullmatch(r"\d{6}", line.client_invoice.strip())):
-            raise HTTPException(status_code=400, detail=f"File {doc.get('file')}: both invoice numbers need 6 digits")
-        notes.append({
-            "docId": doc["id"], "docNo": doc.get("no", ""), "clientId": doc.get("clientId", ""),
-            "file": doc.get("file", ""), "amount": round(line.amount, 2),
-            "fs_invoice": line.fs_invoice.strip(), "client_invoice": line.client_invoice.strip(),
-        })
-    req = {
-        "id": str(uuid.uuid4()), "no": await _next_credit_no(), "date": day.isoformat(),
-        "notes": notes, "total": round(sum(n["amount"] for n in notes), 2), "created_at": _now_iso(),
-    }
-    await db.credit_requests.insert_one(dict(req))
-    for n in notes:
-        await db.documents.update_one({"id": n["docId"]}, {"$set": {
-            "status": "Credited", "creditRequestId": req["id"], "creditRequestNo": req["no"], "creditedOn": req["date"],
-            "fsInvoice": n["fs_invoice"], "clientInvoice": n["client_invoice"], "updated_at": _now_iso(),
-        }})
-    return req
 
 
-@api_router.delete("/credit-requests/{req_id}")
-async def delete_credit_request(req_id: str):
-    req = await db.credit_requests.find_one({"id": req_id}, _proj())
-    if not req:
-        raise HTTPException(status_code=404, detail="Credit request not found")
-    for n in req.get("notes", []):
-        await db.documents.update_one({"id": n["docId"], "creditRequestId": req_id}, {
-            "$set": {"status": "Accepted", "updated_at": _now_iso()},
-            "$unset": {"creditRequestId": "", "creditRequestNo": "", "creditedOn": ""},
-        })
-    await db.credit_requests.delete_one({"id": req_id})
-    return {"ok": True}
-
-
-@api_router.get("/credit-requests/{req_id}/xlsx")
-async def credit_request_xlsx(req_id: str):
-    req = await db.credit_requests.find_one({"id": req_id}, _proj())
-    if not req:
-        raise HTTPException(status_code=404, detail="Credit request not found")
-    data = build_credit_workbook(date.fromisoformat(req["date"]), req["notes"])
-    name = f"Credit Note Request - Forwarding {req['date']}.xlsx"
+def _xlsx_response(data: bytes, name: str) -> StreamingResponse:
     return StreamingResponse(
         io.BytesIO(data),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{name}"'},
     )
+
+
+@api_router.get("/credit-notes")
+async def list_credit_notes():
+    return await db.credit_notes.find({}, _proj()).sort("created_at", -1).to_list(2000)
+
+
+@api_router.post("/credit-notes")
+async def create_credit_note(payload: CreditNotePayload):
+    day = _day(payload.date)
+    doc = await db.documents.find_one({"id": payload.docId}, _proj())
+    if not doc or doc.get("type") != "pfi":
+        raise HTTPException(status_code=404, detail="Pro forma not found")
+    if doc.get("creditNoteId"):
+        raise HTTPException(status_code=409, detail=f"{doc.get('no')} has already been credited")
+    fs, client_inv = payload.fs_invoice.strip(), payload.client_invoice.strip()
+    if not (SIX_DIGITS.fullmatch(fs) and SIX_DIGITS.fullmatch(client_inv)):
+        raise HTTPException(status_code=400, detail="Both invoice numbers need 6 digits")
+    note = {
+        "id": str(uuid.uuid4()), "docId": doc["id"], "docNo": doc.get("no", ""), "clientId": doc.get("clientId", ""),
+        "file": doc.get("file", ""), "amount": round(payload.amount, 2), "fs_invoice": fs, "client_invoice": client_inv,
+        "date": day.isoformat(), "listId": None, "created_at": _now_iso(),
+    }
+    await db.credit_notes.insert_one(dict(note))
+    await db.documents.update_one({"id": doc["id"]}, {"$set": {
+        "status": "Credited", "creditNoteId": note["id"], "creditedOn": note["date"],
+        "fsInvoice": fs, "clientInvoice": client_inv, "updated_at": _now_iso(),
+    }})
+    return note
+
+
+@api_router.delete("/credit-notes/{note_id}")
+async def delete_credit_note(note_id: str):
+    note = await db.credit_notes.find_one({"id": note_id}, _proj())
+    if not note:
+        raise HTTPException(status_code=404, detail="Credit note not found")
+    if note.get("listId"):
+        raise HTTPException(status_code=409, detail="This credit note is on a list that has been printed")
+    await db.documents.update_one({"id": note["docId"], "creditNoteId": note_id}, {
+        "$set": {"status": "Accepted", "updated_at": _now_iso()},
+        "$unset": {"creditNoteId": "", "creditedOn": ""},
+    })
+    await db.credit_notes.delete_one({"id": note_id})
+    return {"ok": True}
+
+
+@api_router.get("/credit-notes/{note_id}/xlsx")
+async def credit_note_xlsx(note_id: str, date: Optional[str] = None):
+    note = await db.credit_notes.find_one({"id": note_id}, _proj())
+    if not note:
+        raise HTTPException(status_code=404, detail="Credit note not found")
+    day = _day(date) if date else datetime.now(timezone.utc).date()  # always printed with the day's date
+    return _xlsx_response(build_note_workbook(day, note), f"Pro-forma Credit Note {note['file']}.xlsx")
+
+
+async def _next_list_no() -> str:
+    year = datetime.now(timezone.utc).strftime("%y")
+    n = await db.credit_lists.count_documents({"no": {"$regex": f"^CL-{year}-"}})
+    return f"CL-{year}-{n + 1:03d}"
+
+
+@api_router.get("/credit-lists")
+async def list_credit_lists():
+    return await db.credit_lists.find({}, _proj()).sort("created_at", -1).to_list(500)
+
+
+@api_router.post("/credit-lists")
+async def close_credit_list(payload: CreditListPayload):
+    """Prints the open list: every credit note not on a list yet goes on this one."""
+    day = _day(payload.date)
+    notes = await db.credit_notes.find({"listId": None}, _proj()).sort("created_at", 1).to_list(500)
+    if not notes:
+        raise HTTPException(status_code=400, detail="There are no credit notes on the current list")
+    lst = {
+        "id": str(uuid.uuid4()), "no": await _next_list_no(), "date": day.isoformat(),
+        "noteIds": [n["id"] for n in notes],
+        "notes": [{k: n[k] for k in ("id", "file", "amount", "fs_invoice", "client_invoice", "docNo", "clientId")} for n in notes],
+        "total": round(sum(n["amount"] for n in notes), 2), "created_at": _now_iso(),
+    }
+    await db.credit_lists.insert_one(dict(lst))
+    await db.credit_notes.update_many({"id": {"$in": lst["noteIds"]}}, {"$set": {"listId": lst["id"], "listNo": lst["no"]}})
+    return lst
+
+
+@api_router.get("/credit-lists/{list_id}/xlsx")
+async def credit_list_xlsx(list_id: str):
+    lst = await db.credit_lists.find_one({"id": list_id}, _proj())
+    if not lst:
+        raise HTTPException(status_code=404, detail="List not found")
+    return _xlsx_response(build_list_workbook(_day(lst["date"]), lst["notes"]), f"Credit Note Request - Forwarding {lst['date']} ({lst['no']}).xlsx")
 
 
 import base64  # noqa: E402

@@ -31,22 +31,27 @@ export const useSettings = () =>
 export const useDocuments = () =>
   useQuery({ queryKey: ["documents"], queryFn: async () => (await api.get("/documents")).data });
 
-export const useCreditRequests = () =>
-  useQuery({ queryKey: ["credit-requests"], queryFn: async () => (await api.get("/credit-requests")).data });
+export const useCreditNotes = () =>
+  useQuery({ queryKey: ["credit-notes"], queryFn: async () => (await api.get("/credit-notes")).data });
+export const useCreditLists = () =>
+  useQuery({ queryKey: ["credit-lists"], queryFn: async () => (await api.get("/credit-lists")).data });
 
-/** Downloads a credit note request as the forwarding team's credit note workbook. */
-export async function downloadCreditRequest(req) {
-  const res = await fetch(`${API}/credit-requests/${req.id}/xlsx`);
+async function saveDownload(path, name) {
+  const res = await fetch(`${API}${path}`);
   if (!res.ok) throw new Error("Download failed");
   const url = URL.createObjectURL(await res.blob());
   const a = document.createElement("a");
   a.href = url;
-  a.download = `Credit Note Request - Forwarding ${req.date} (${req.no}).xlsx`;
+  a.download = name;
   document.body.appendChild(a);
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
 }
+/** One PRO-FORMA CREDIT NOTE (two copies, two pages), dated today. */
+export const downloadCreditNote = (n) => saveDownload(`/credit-notes/${n.id}/xlsx?date=${todayIso()}`, `Pro-forma Credit Note ${n.file}.xlsx`);
+/** A printed CREDIT NOTE REQUEST list. */
+export const downloadCreditList = (l) => saveDownload(`/credit-lists/${l.id}/xlsx`, `Credit Note Request - Forwarding ${l.date} (${l.no}).xlsx`);
 
 export const useVessels = () =>
   useQuery({ queryKey: ["vessels"], queryFn: async () => (await api.get("/vessels")).data.vessels || [] });
