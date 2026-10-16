@@ -283,6 +283,13 @@ export default function DocBuilder({ initial, onClose }) {
     setD((d) => ({ lines: match ? d.lines.map((l) => (l.id === match.id ? { ...l, ...pick } : l)) : [...d.lines, Ln(ql.group, ql.code, ql.desc, ql.ec, ql.cur, ql.basis, ql.rate, { ...pick })] }));
     toast(match ? `${ql.desc}: rate from the quote` : `${ql.desc} added from the quote`);
   };
+  // Tab / Shift+Tab in a rate box jumps straight to the next / previous line's rate
+  const tabToRate = (e) => {
+    if (e.key !== "Tab") return;
+    const rates = [...document.querySelectorAll(".oo-cap input[data-rate]")];
+    const next = rates[rates.indexOf(e.currentTarget) + (e.shiftKey ? -1 : 1)];
+    if (next) { e.preventDefault(); next.focus(); }
+  };
   const addLine = (g) => setD((d) => ({
     lines: [...d.lines, Ln(g, g === "fees" ? "10011" : g === "local" && d.tpl === "imp" ? "30022" : "30050", "", "", "ZAR", "flat", "", { vat: (g === "local" && d.tpl === "imp") || g === "fees", type: g === "fees" ? "R" : "D" })],
   }));
@@ -491,7 +498,7 @@ export default function DocBuilder({ initial, onClose }) {
                         </select>
                         <div style={{ display: "flex", gap: 4, alignItems: "center", minWidth: 0 }}>
                           {l.basis === "depot" && <input className="oo-input ln num" style={{ padding: "7px 5px" }} value={l.base} onChange={(e) => setLine(l.id, { base: e.target.value })} title="Flat amount" />}
-                          <input className="oo-input ln num" value={l.rate} onChange={(e) => setLine(l.id, { rate: e.target.value })} inputMode="decimal" placeholder="0" title={l.basis === "pct" ? "Percentage" : l.basis === "depot" ? "Per cbm" : "Rate"} />
+                          <input className="oo-input ln num" data-rate value={l.rate} onChange={(e) => setLine(l.id, { rate: e.target.value })} onKeyDown={tabToRate} onFocus={(e) => e.target.select()} inputMode="decimal" placeholder="0" title={l.basis === "pct" ? "Percentage" : l.basis === "depot" ? "Per cbm" : "Rate"} />
                         </div>
                         <button type="button" className={`oo-vat ${l.vat ? "on" : ""}`} title="15% VAT" onClick={() => setLine(l.id, { vat: !l.vat })}>{l.vat ? "✓" : ""}</button>
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", minWidth: 0 }}>
