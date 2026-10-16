@@ -14,6 +14,7 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 from openpyxl.drawing.image import Image
+from openpyxl.styles import Border
 
 TEMPLATE = Path(__file__).parent / "static" / "templates" / "credit_note_template.xlsx"
 LIST_ROWS = 12  # request lines on one List sheet (rows 4–15)
@@ -103,7 +104,12 @@ def _fill_list(ws, day: date, notes: list[dict]) -> None:
         ws[f"D{r}"] = _num(n.get("file"))
         ws[f"E{r}"] = "Requested"
     ws["C16"] = round(sum(float(n.get("amount") or 0) for n in notes), 2)
-    ws["E26"] = f"Date:         {day.strftime('%Y/%m/%d')}"
+    ws["E26"] = None  # no date at the bottom
+    # The line under each request runs across the whole row, not just AMOUNT
+    for r in range(4, 4 + LIST_ROWS):
+        line = ws[f"B{r}"].border
+        for c in "CDE":
+            ws[f"{c}{r}"].border = Border(top=copy.copy(line.top), bottom=copy.copy(line.bottom))
 
 
 def _duplicate_below(ws, rows: int, logo: bytes) -> None:

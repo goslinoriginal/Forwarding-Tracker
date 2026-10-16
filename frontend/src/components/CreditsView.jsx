@@ -231,7 +231,6 @@ function CreditModal({ row, nameOf, onClose, onDone }) {
           <input className="oo-input big mono" value={client} onChange={digits(setClient)} placeholder="6 digits" inputMode="numeric" maxLength={6} style={box(client)} onKeyDown={(e) => e.key === "Enter" && create()} data-testid="cn-client" />
         </label>
       </div>
-      <span style={{ fontSize: 12, color: "var(--mute)" }}>Account 5613 · FREIGHT STATEMENT · 30050 FORWARDING · {money("ZAR", amount)} · no VAT. Downloads as one PRO-FORMA CREDIT NOTE with 2 copies, and goes on the current list.</span>
       <div className="oo-modal-actions">
         <button type="button" className="oo-btn foot" style={{ padding: "11px 18px" }} onClick={onClose}>Cancel</button>
         <button type="button" className="oo-btn primary foot" style={{ padding: "11px 20px" }} onClick={create} disabled={busy || !ok} data-testid="cn-create">Create credit note</button>
