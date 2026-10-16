@@ -5,7 +5,7 @@ import { Seg, useToast } from "@/lib/ui";
 /* "Download" on the client page: new design or the old format, Excel or PDF.
    Group clients (Mushrooms, Handovers) can download one end client's share, or
    split the whole report into one file per end client. */
-export default function DownloadMenu({ client }) {
+export default function DownloadMenu({ client, beforeDownload }) {
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [old, setOld] = useState(false);
@@ -27,6 +27,7 @@ export default function DownloadMenu({ client }) {
   const one = async (fmt) => {
     setBusy(true);
     try {
+      if (beforeDownload) await beforeDownload();
       await downloadReport(client, fmt, { old, endClient });
       toast(`${label(fmt)} downloaded${endClient ? ` · ${endClient}` : ""}${old ? " (old format)" : ""}`);
     } catch { toast("Export failed", { error: true }); }
@@ -35,6 +36,7 @@ export default function DownloadMenu({ client }) {
   const split = async (fmt) => {
     setBusy(true);
     try {
+      if (beforeDownload) await beforeDownload();
       for (const ec of endClients) await downloadReport(client, fmt, { old, endClient: ec });
       toast(`${endClients.length} ${label(fmt)} report${endClients.length === 1 ? "" : "s"} downloaded — one per client`);
     } catch { toast("Export failed", { error: true }); }

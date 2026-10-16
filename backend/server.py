@@ -2209,6 +2209,7 @@ EXPORT_FORMATS = ["PDF", "Excel", "PDF + Excel"]
 class SettingsUpdate(BaseModel):
     default_columns: Optional[dict] = None
     export_format: Optional[str] = None
+    report_design: Optional[str] = None  # "new" | "old" — the status report design "Send report" attaches
     quick_comments: Optional[List[str]] = None
     email_default_to: Optional[str] = None
     email_default_cc: Optional[str] = None
@@ -2241,6 +2242,7 @@ async def _get_settings() -> dict:
     return {
         "default_columns": {**DEFAULT_OPTIONAL_COLUMNS, **(doc.get("default_columns") or {})},
         "export_format": doc.get("export_format") or "PDF + Excel",
+        "report_design": doc.get("report_design") if doc.get("report_design") in ("new", "old") else "new",
         "quick_comments": doc.get("quick_comments") if doc.get("quick_comments") is not None else list(DEFAULT_QUICK_COMMENTS),
         **{k: doc[k] if doc.get(k) is not None else v for k, v in _EMAIL_DEFAULTS.items()},
     }
@@ -2299,6 +2301,8 @@ async def update_settings(payload: SettingsUpdate):
         if payload.export_format not in EXPORT_FORMATS:
             raise HTTPException(status_code=400, detail="Unknown export format")
         updates["export_format"] = payload.export_format
+    if payload.report_design in ("new", "old"):
+        updates["report_design"] = payload.report_design
     if payload.quick_comments is not None:
         updates["quick_comments"] = [c for c in payload.quick_comments if (c or "").strip()]
     for k in _EMAIL_DEFAULTS:

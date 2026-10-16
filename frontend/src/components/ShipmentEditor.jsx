@@ -6,6 +6,7 @@ import {
   useClients, useRefresh, useReportLog, useSettings, useShipments, useVessels,
   isGroupClient,
 } from "@/lib/data";
+import DownloadMenu from "@/components/DownloadMenu";
 import { STATUS_HUE, Pill, copyText, dmy, nowHm, parseDayInput, todayIso, useToast } from "@/lib/ui";
 
 /* The status report editor: a full-screen sheet listing a client's active shipments
@@ -196,14 +197,21 @@ function ShipmentEditor({ clientId, shipId, onClose }) {
     if (rest.length) setEditId(rest[Math.min(idx, rest.length - 1)]); else onClose();
   });
 
-  const sendReport = () => run(async () => {
-    let saved = 0;
+  // Unsaved edits are saved first, so a download matches what's on screen
+  const saveEdits = async () => {
+    let n = 0;
     for (const id of railIds) {
-      if (isDirty(id) && id !== NEW_ID) { await commit(id); saved++; }
+      if (isDirty(id) && id !== NEW_ID) { await commit(id); n++; }
     }
+    return n;
+  };
+
+  const sendReport = () => run(async () => {
+    const saved = await saveEdits();
     const fmt = settings?.export_format || "PDF + Excel";
-    if (fmt.includes("PDF")) await downloadReport(client, "pdf");
-    if (fmt.includes("Excel")) await downloadReport(client, "xlsx");
+    const old = settings?.report_design === "old";
+    if (fmt.includes("PDF")) await downloadReport(client, "pdf", { old });
+    if (fmt.includes("Excel")) await downloadReport(client, "xlsx", { old });
     if (client.internal) {
       // Internal group reports aren't emailed to anyone or tracked as "sent"
       await refresh();
@@ -249,8 +257,7 @@ function ShipmentEditor({ clientId, shipId, onClose }) {
           </div>
         </div>
         <div className="oo-actions">
-          <button type="button" className="oo-btn" onClick={() => run(async () => { await downloadReport(client, "xlsx"); toast("Excel downloaded"); })}>Excel</button>
-          <button type="button" className="oo-btn" onClick={() => run(async () => { await downloadReport(client, "pdf"); toast("PDF downloaded"); })}>PDF</button>
+          <DownloadMenu client={client} beforeDownload={saveEdits} />
           <button type="button" className="oo-btn primary" onClick={sendReport} disabled={busy}>{client.internal ? "Download report" : sentT ? "Resend report" : "Send report"}</button>
         </div>
       </header>

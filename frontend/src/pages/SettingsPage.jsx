@@ -137,12 +137,18 @@ export default function SettingsPage() {
       </section>
 
       <section className="oo-set">
-        <div className="oo-card-title"><h2>Export format</h2><span className="oo-sub">What "Send report" attaches.</span></div>
+        <div className="oo-card-title"><h2>Export format</h2><span className="oo-sub">What "Send report" attaches. Any format and design can still be downloaded from Download ▾.</span></div>
         <Seg
           size="lg"
           value={settings?.export_format || "PDF + Excel"}
           onChange={(v) => update({ export_format: v })}
           options={["PDF", "Excel", "PDF + Excel"].map((f) => ({ value: f, label: f }))}
+        />
+        <Seg
+          size="lg"
+          value={settings?.report_design || "new"}
+          onChange={(v) => update({ report_design: v })}
+          options={[{ value: "new", label: "New design" }, { value: "old", label: "Old format" }]}
         />
       </section>
 
